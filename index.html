@@ -527,7 +527,7 @@ function renderHistory(){
   const list = document.getElementById('historyList');
   if (!list) return;
   if (alertHistory.length === 0){
-    list.innerHTML = '<div class="history-empty">Aucune alerte pour l\\'instant.</div>';
+    list.innerHTML = '<div class="history-empty">Aucune alerte pour le moment.</div>';
     return;
   }
   list.innerHTML = alertHistory.slice().reverse().map(ts => {
