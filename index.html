@@ -419,6 +419,21 @@ async function startScreen(code){
   connectToCamera(code, setStatus);
 }
 
+function createDummyStream(){
+  const canvas = document.createElement('canvas');
+  canvas.width = 2; canvas.height = 2;
+  const ctx = canvas.getContext('2d');
+  ctx.fillRect(0, 0, 2, 2);
+  const videoTrack = canvas.captureStream(1).getVideoTracks()[0];
+
+  const dummyAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try{ dummyAudioCtx.resume(); }catch(e){}
+  const dest = dummyAudioCtx.createMediaStreamDestination();
+  const audioTrack = dest.stream.getAudioTracks()[0];
+
+  return new MediaStream([videoTrack, audioTrack]);
+}
+
 function connectToCamera(code, setStatus){
   const retryWrap = document.getElementById('retryWrap');
   retryWrap.innerHTML = '';
@@ -426,8 +441,8 @@ function connectToCamera(code, setStatus){
   peer = new Peer();
 
   peer.on('open', () => {
-    const emptyStream = new MediaStream();
-    call = peer.call(PEER_PREFIX + code, emptyStream);
+    const dummyStream = createDummyStream();
+    call = peer.call(PEER_PREFIX + code, dummyStream);
 
     call.on('stream', stream => {
       remoteStream = stream;
