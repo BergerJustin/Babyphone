@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Veilleuse — Babyphone</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 <style>
   :root{
     --bg: #0e0d12;
@@ -130,7 +131,7 @@
   @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
   video{
     width:100%; border-radius:14px; background:#000; display:block;
-    aspect-ratio: 4/3; object-fit:cover; margin-bottom:14px;
+    aspect-ratio: 4/3; object-fit:cover; margin-bottom:0;
   }
   .meter-wrap{ margin-bottom:16px; }
   .meter{
@@ -160,8 +161,11 @@
   }
   .alert-flash.on{ opacity:1; }
   .hint{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.78rem; color:var(--moon-dim); text-align:center; margin-top:16px; line-height:1.5; }
+  .back{
+    position:fixed; top:18px; left:18px; z-index:2; background:none; border:none; color:var(--moon-dim);
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; cursor:pointer;
+  }
   .video-wrap{ position:relative; margin-bottom:14px; }
-  .video-wrap video{ margin-bottom:0; }
   .black-overlay{
     position:absolute; inset:0; background:#000; border-radius:14px;
     display:none; flex-direction:column; align-items:center; justify-content:center; gap:6px;
@@ -188,10 +192,7 @@
     background:none; border:none; color:var(--moon-dim); font-family:'Helvetica Neue', Arial, sans-serif;
     font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:8px; padding:0;
   }
-  .back{
-    position:fixed; top:18px; left:18px; z-index:2; background:none; border:none; color:var(--moon-dim);
-    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; cursor:pointer;
-  }
+  .retry-btn{ margin-top:14px; }
 </style>
 </head>
 <body>
@@ -201,19 +202,21 @@
 <div id="app"></div>
 
 <script>
-const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const PEER_PREFIX = 'babyphone5-';
 const app = document.getElementById('app');
 const alertFlash = document.getElementById('alertFlash');
 
-let pc = null, localStream = null, remoteStream = null;
-let pollTimers = [];
+let peer = null, call = null;
+let localStream = null, remoteStream = null;
 let audioCtx = null, analyser = null, meterRaf = null;
+let alertHistory = [];
+let currentRoomCode = null;
+let blackModeOn = false;
 
-function clearTimers(){ pollTimers.forEach(t => clearInterval(t)); pollTimers = []; }
 function stopEverything(){
-  clearTimers();
   if (meterRaf) cancelAnimationFrame(meterRaf);
-  if (pc) { try{ pc.close(); }catch(e){} pc = null; }
+  if (call) { try{ call.close(); }catch(e){} call = null; }
+  if (peer) { try{ peer.destroy(); }catch(e){} peer = null; }
   if (localStream) { localStream.getTracks().forEach(t=>t.stop()); localStream = null; }
   if (audioCtx) { try{ audioCtx.close(); }catch(e){} audioCtx = null; }
 }
@@ -226,45 +229,22 @@ function randomCode(){
   return c;
 }
 
-async function storageGet(key){
-  try{
-    const r = await window.storage.get(key, true);
-    return r ? r.value : null;
-  }catch(e){ return null; }
+// Local browser storage for this device's own alert history (works on any real host)
+function historyLoad(code){
+  try{ return JSON.parse(localStorage.getItem('bp-alerts-' + code) || '[]'); }catch(e){ return []; }
 }
-async function storageSet(key, value){
-  try{ await window.storage.set(key, value, true); }catch(e){ console.error('storage set failed', e); }
-}
-async function storageDelete(key){
-  try{ await window.storage.delete(key, true); }catch(e){}
+function historySave(code, list){
+  try{ localStorage.setItem('bp-alerts-' + code, JSON.stringify(list)); }catch(e){}
 }
 
-// Personal (non-shared) storage — used for this device's own alert history
-async function storageGetLocal(key){
-  try{
-    const r = await window.storage.get(key, false);
-    return r ? r.value : null;
-  }catch(e){ return null; }
-}
-async function storageSetLocal(key, value){
-  try{ await window.storage.set(key, value, false); }catch(e){}
-}
-async function storageDeleteLocal(key){
-  try{ await window.storage.delete(key, false); }catch(e){}
-}
-
-let alertHistory = [];
-let currentRoomCode = null;
-let blackModeOn = false;
-
-// ---------- SCREENS ----------
+// ---------- HOME ----------
 
 function renderHome(){
   stopEverything();
   app.innerHTML = `
     <div class="eyebrow">Veilleuse</div>
     <h1>Babyphone maison</h1>
-    <div class="sub">Deux téléphones, une connexion directe. Aucune vidéo ne transite par un serveur — le flux va d'un appareil à l'autre.</div>
+    <div class="sub">Deux téléphones, une connexion directe. La vidéo passe d'un appareil à l'autre — seule la mise en relation initiale passe par un service de signalisation public.</div>
     <div class="choice-row">
       <button class="choice-btn" id="btnCam">
         <div class="glyph">📹</div>
@@ -275,7 +255,7 @@ function renderHome(){
         <div><div>Écran</div><small>Pour surveiller à distance</small></div>
       </button>
     </div>
-    <div class="hint">Astuce : utilisez les deux téléphones sur le même Wi-Fi pour une connexion plus fiable.</div>
+    <div class="hint">Astuce : les deux téléphones doivent avoir une connexion internet active (Wi-Fi ou 4G/5G).</div>
   `;
   document.getElementById('btnCam').onclick = renderCameraSetup;
   document.getElementById('btnScreen').onclick = renderScreenSetup;
@@ -327,7 +307,7 @@ async function startCamera(){
     <div class="eyebrow">Caméra active</div>
     <h1>Code : partagez-le</h1>
     <div class="code-display">${code}</div>
-    <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">En attente d'initialisation de la caméra…</span></div>
+    <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">Initialisation de la caméra…</span></div>
     <video id="localVideo" autoplay playsinline muted></video>
     <div class="hint">Entrez ce code sur le téléphone-écran. Laissez cette page ouverte tant que la surveillance est active.</div>
   `;
@@ -340,56 +320,39 @@ async function startCamera(){
   try{
     localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: true });
   }catch(e){
-    setStatus('Impossible d\'accéder à la caméra/micro. Vérifiez les autorisations.', 'error');
+    setStatus("Impossible d'accéder à la caméra/micro. Vérifiez les autorisations du site.", 'error');
     return;
   }
   document.getElementById('localVideo').srcObject = localStream;
-  setStatus('Caméra prête. En attente de connexion de l\'écran…', 'connecting');
+  setStatus('Caméra prête. Connexion au service de mise en relation…', 'connecting');
 
-  pc = new RTCPeerConnection(STUN);
-  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+  peer = new Peer(PEER_PREFIX + code);
 
-  pc.onicecandidate = async (e) => {
-    if (!e.candidate) return;
-    const existing = JSON.parse((await storageGet(`room:${code}:cand:camera`)) || '[]');
-    existing.push(e.candidate.toJSON());
-    await storageSet(`room:${code}:cand:camera`, JSON.stringify(existing));
-  };
+  peer.on('open', () => {
+    setStatus("Caméra prête. En attente de connexion de l'écran…", 'connecting');
+  });
 
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') setStatus('Connecté ✅ — l\'écran reçoit l\'image.', 'live');
-    else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') setStatus('Connexion perdue. Rechargez pour réessayer.', 'error');
-  };
+  peer.on('call', incomingCall => {
+    call = incomingCall;
+    call.answer(localStream);
+    setStatus('Connecté ✅ — l\'écran reçoit l\'image.', 'live');
+    call.on('close', () => setStatus('Écran déconnecté.', 'connecting'));
+  });
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await storageSet(`room:${code}:offer`, JSON.stringify({ sdp: offer.sdp, type: offer.type }));
-
-  let answerApplied = false;
-  let appliedCandCount = 0;
-
-  const t1 = setInterval(async () => {
-    if (answerApplied) return;
-    const raw = await storageGet(`room:${code}:answer`);
-    if (!raw) return;
-    answerApplied = true;
-    const answer = JSON.parse(raw);
-    await pc.setRemoteDescription(new RTCSessionDescription(answer));
-    setStatus('Réponse reçue, établissement de la connexion…', 'connecting');
-  }, 1500);
-
-  const t2 = setInterval(async () => {
-    if (!answerApplied) return;
-    const raw = await storageGet(`room:${code}:cand:screen`);
-    if (!raw) return;
-    const list = JSON.parse(raw);
-    for (let i = appliedCandCount; i < list.length; i++) {
-      try{ await pc.addIceCandidate(new RTCIceCandidate(list[i])); }catch(e){}
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') {
+      setStatus('Ce code est déjà utilisé, rechargez la page pour en générer un autre.', 'error');
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'disconnected') {
+      setStatus('Problème de connexion au service. Nouvelle tentative…', 'error');
+    } else {
+      setStatus('Erreur : ' + err.type, 'error');
     }
-    appliedCandCount = list.length;
-  }, 1500);
+  });
 
-  pollTimers.push(t1, t2);
+  peer.on('disconnected', () => {
+    setStatus('Connexion au service perdue, reconnexion…', 'connecting');
+    try{ peer.reconnect(); }catch(e){}
+  });
 }
 
 // ---------- SCREEN ROLE ----------
@@ -397,7 +360,7 @@ async function startCamera(){
 async function startScreen(code){
   currentRoomCode = code;
   blackModeOn = false;
-  alertHistory = JSON.parse((await storageGetLocal(`alerts:${code}`)) || '[]');
+  alertHistory = historyLoad(code);
 
   app.innerHTML = `
     <button class="back" id="back">← Retour</button>
@@ -411,6 +374,7 @@ async function startScreen(code){
         <div class="black-text">Écran noir actif<br><span>Le son reste surveillé — touchez pour rallumer</span></div>
       </div>
     </div>
+    <div id="retryWrap"></div>
     <div class="meter-wrap">
       <label>Niveau sonore</label>
       <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
@@ -441,9 +405,9 @@ async function startScreen(code){
   const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
 
   renderHistory();
-  document.getElementById('clearHistory').onclick = async () => {
+  document.getElementById('clearHistory').onclick = () => {
     alertHistory = [];
-    await storageSetLocal(`alerts:${code}`, '[]');
+    historySave(code, alertHistory);
     renderHistory();
   };
 
@@ -452,57 +416,52 @@ async function startScreen(code){
   blackToggle.onchange = () => setBlackMode(blackToggle.checked);
   blackOverlay.onclick = () => { blackToggle.checked = false; setBlackMode(false); };
 
-  pc = new RTCPeerConnection(STUN);
-  const remoteVideoEl = document.getElementById('remoteVideo');
-  remoteStream = new MediaStream();
-  remoteVideoEl.srcObject = remoteStream;
+  connectToCamera(code, setStatus);
+}
 
-  pc.ontrack = (e) => {
-    remoteStream.addTrack(e.track);
-    if (e.track.kind === 'video' && blackModeOn) e.track.enabled = false;
-    if (e.track.kind === 'audio') setupMeter(remoteStream);
-  };
+function connectToCamera(code, setStatus){
+  const retryWrap = document.getElementById('retryWrap');
+  retryWrap.innerHTML = '';
 
-  pc.onicecandidate = async (e) => {
-    if (!e.candidate) return;
-    const existing = JSON.parse((await storageGet(`room:${code}:cand:screen`)) || '[]');
-    existing.push(e.candidate.toJSON());
-    await storageSet(`room:${code}:cand:screen`, JSON.stringify(existing));
-  };
+  peer = new Peer();
 
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') setStatus('Connecté ✅ — image en direct.', 'live');
-    else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') setStatus('Connexion perdue. Rechargez pour réessayer.', 'error');
-  };
+  peer.on('open', () => {
+    const emptyStream = new MediaStream();
+    call = peer.call(PEER_PREFIX + code, emptyStream);
 
-  let offerApplied = false;
-  let appliedCandCount = 0;
+    call.on('stream', stream => {
+      remoteStream = stream;
+      document.getElementById('remoteVideo').srcObject = remoteStream;
+      setStatus('Connecté ✅ — image en direct.', 'live');
+      if (blackModeOn) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
+      if (remoteStream.getAudioTracks().length) setupMeter(remoteStream);
+    });
 
-  const t1 = setInterval(async () => {
-    if (offerApplied) return;
-    const raw = await storageGet(`room:${code}:offer`);
-    if (!raw) return;
-    offerApplied = true;
-    const offer = JSON.parse(raw);
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    await storageSet(`room:${code}:answer`, JSON.stringify({ sdp: answer.sdp, type: answer.type }));
-    setStatus('Caméra trouvée, établissement de la connexion…', 'connecting');
-  }, 1500);
+    call.on('close', () => setStatus('Connexion perdue.', 'error'));
+    call.on('error', () => showRetry(code, setStatus, "Erreur de connexion à la caméra."));
+  });
 
-  const t2 = setInterval(async () => {
-    if (!offerApplied) return;
-    const raw = await storageGet(`room:${code}:cand:camera`);
-    if (!raw) return;
-    const list = JSON.parse(raw);
-    for (let i = appliedCandCount; i < list.length; i++) {
-      try{ await pc.addIceCandidate(new RTCIceCandidate(list[i])); }catch(e){}
+  peer.on('error', err => {
+    if (err.type === 'peer-unavailable') {
+      showRetry(code, setStatus, "Caméra introuvable. Vérifiez le code, ou que la caméra est bien démarrée.");
+    } else if (err.type === 'network' || err.type === 'server-error') {
+      showRetry(code, setStatus, 'Problème de connexion au service.');
+    } else {
+      showRetry(code, setStatus, 'Erreur : ' + err.type);
     }
-    appliedCandCount = list.length;
-  }, 1500);
+  });
+}
 
-  pollTimers.push(t1, t2);
+function showRetry(code, setStatus, message){
+  setStatus(message, 'error');
+  const retryWrap = document.getElementById('retryWrap');
+  if (!retryWrap) return;
+  retryWrap.innerHTML = `<button class="btn btn-primary retry-btn" id="retryBtn">Réessayer</button>`;
+  document.getElementById('retryBtn').onclick = () => {
+    if (peer) { try{ peer.destroy(); }catch(e){} peer = null; }
+    setStatus('Recherche de la caméra…', 'connecting');
+    connectToCamera(code, setStatus);
+  };
 }
 
 function setupMeter(stream){
@@ -556,11 +515,11 @@ function triggerAlert(){
   logAlert();
 }
 
-async function logAlert(){
+function logAlert(){
   if (!currentRoomCode) return;
   alertHistory.push(new Date().toISOString());
   if (alertHistory.length > 20) alertHistory = alertHistory.slice(-20);
-  await storageSetLocal(`alerts:${currentRoomCode}`, JSON.stringify(alertHistory));
+  historySave(currentRoomCode, alertHistory);
   renderHistory();
 }
 
@@ -568,7 +527,7 @@ function renderHistory(){
   const list = document.getElementById('historyList');
   if (!list) return;
   if (alertHistory.length === 0){
-    list.innerHTML = '<div class="history-empty">Aucune alerte pour l\'instant.</div>';
+    list.innerHTML = '<div class="history-empty">Aucune alerte pour l\\'instant.</div>';
     return;
   }
   list.innerHTML = alertHistory.slice().reverse().map(ts => {
