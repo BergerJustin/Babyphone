@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Veilleuse — Babyphone</title>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" onerror="var s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'; document.head.appendChild(s);"></script>
 <style>
   :root{
     --bg: #0e0d12;
@@ -202,6 +202,13 @@
 <div id="app"></div>
 
 <script>
+window.addEventListener('error', (e) => {
+  const statusText = document.getElementById('statusText');
+  const dot = document.getElementById('dot');
+  if (statusText) statusText.textContent = 'Erreur technique : ' + (e.message || 'inconnue');
+  if (dot) dot.className = 'dot error';
+});
+
 const PEER_PREFIX = 'babyphone5-';
 const app = document.getElementById('app');
 const alertFlash = document.getElementById('alertFlash');
@@ -438,22 +445,43 @@ function connectToCamera(code, setStatus){
   const retryWrap = document.getElementById('retryWrap');
   retryWrap.innerHTML = '';
 
-  peer = new Peer();
+  if (typeof Peer === 'undefined') {
+    showRetry(code, setStatus, "La bibliothèque de connexion n'a pas pu se charger. Vérifiez votre connexion internet.");
+    return;
+  }
+
+  let dummyStream;
+  try{
+    dummyStream = createDummyStream();
+  }catch(e){
+    setStatus('Préparation du flux impossible (' + e.message + '), tentative simplifiée…', 'connecting');
+    dummyStream = new MediaStream();
+  }
+
+  try{
+    peer = new Peer();
+  }catch(e){
+    showRetry(code, setStatus, 'Impossible de créer la connexion : ' + e.message);
+    return;
+  }
 
   peer.on('open', () => {
-    const dummyStream = createDummyStream();
-    call = peer.call(PEER_PREFIX + code, dummyStream);
+    try{
+      call = peer.call(PEER_PREFIX + code, dummyStream);
 
-    call.on('stream', stream => {
-      remoteStream = stream;
-      document.getElementById('remoteVideo').srcObject = remoteStream;
-      setStatus('Connecté ✅ — image en direct.', 'live');
-      if (blackModeOn) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
-      if (remoteStream.getAudioTracks().length) setupMeter(remoteStream);
-    });
+      call.on('stream', stream => {
+        remoteStream = stream;
+        document.getElementById('remoteVideo').srcObject = remoteStream;
+        setStatus('Connecté ✅ — image en direct.', 'live');
+        if (blackModeOn) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
+        if (remoteStream.getAudioTracks().length) setupMeter(remoteStream);
+      });
 
-    call.on('close', () => setStatus('Connexion perdue.', 'error'));
-    call.on('error', () => showRetry(code, setStatus, "Erreur de connexion à la caméra."));
+      call.on('close', () => setStatus('Connexion perdue.', 'error'));
+      call.on('error', () => showRetry(code, setStatus, "Erreur de connexion à la caméra."));
+    }catch(e){
+      showRetry(code, setStatus, "Impossible d'appeler la caméra : " + e.message);
+    }
   });
 
   peer.on('error', err => {
