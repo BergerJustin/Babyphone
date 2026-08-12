@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Veilleuse — Babyphone</title>
+<style>
+  :root{
+    --bg: #0e0d12;
+    --bg-soft: #17151d;
+    --amber: #e8a24d;
+    --amber-dim: #7a5a2e;
+    --moon: #cfd6e8;
+    --moon-dim: #6b7284;
+    --ok: #7ec99b;
+    --alert: #e8664d;
+    --line: #29262f;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 50% 0%, #1c1a24 0%, var(--bg) 55%);
+    color: var(--moon);
+    font-family: 'Georgia', 'Iowan Old Style', serif;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 28px 18px 40px;
+  }
+  .stars{
+    position:fixed; inset:0; pointer-events:none; opacity:.5;
+    background-image:
+      radial-gradient(1px 1px at 20% 30%, #fff, transparent),
+      radial-gradient(1px 1px at 70% 60%, #fff, transparent),
+      radial-gradient(1px 1px at 40% 80%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 85% 20%, #fff, transparent),
+      radial-gradient(1px 1px at 55% 10%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 10% 65%, #fff, transparent);
+    background-repeat:no-repeat;
+  }
+  .eyebrow{
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.28em;
+    font-size:11px;
+    color: var(--amber);
+    opacity:.85;
+    margin-bottom:6px;
+  }
+  h1{
+    font-weight:400;
+    font-size:1.7rem;
+    margin: 0 0 4px;
+    color:#f3efe6;
+    letter-spacing:.01em;
+  }
+  .sub{
+    font-family:'Helvetica Neue', Arial, sans-serif;
+    color: var(--moon-dim);
+    font-size:.9rem;
+    max-width:340px;
+    text-align:center;
+    line-height:1.5;
+    margin-bottom:28px;
+  }
+  .card{
+    width:100%; max-width:380px;
+    background: linear-gradient(180deg, var(--bg-soft), #131117);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:22px;
+    box-shadow: 0 20px 60px -20px rgba(0,0,0,.6);
+    z-index:1;
+  }
+  .choice-row{ display:flex; flex-direction:column; gap:12px; width:100%; max-width:380px; z-index:1;}
+  .choice-btn{
+    display:flex; align-items:center; gap:14px;
+    background: var(--bg-soft);
+    border:1px solid var(--line);
+    color:#f3efe6;
+    border-radius:16px;
+    padding:18px 20px;
+    font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:1rem;
+    text-align:left;
+    cursor:pointer;
+    transition:.15s border-color, .15s transform;
+  }
+  .choice-btn:active{ transform: scale(.98); }
+  .choice-btn:hover{ border-color: var(--amber-dim); }
+  .choice-btn .glyph{
+    font-size:1.6rem; width:44px; height:44px; flex:none;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:12px; background:rgba(232,162,77,.08);
+  }
+  .choice-btn small{ display:block; color:var(--moon-dim); font-weight:400; margin-top:2px; font-size:.8rem;}
+  label{
+    font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:.78rem; text-transform:uppercase; letter-spacing:.14em;
+    color: var(--moon-dim); display:block; margin-bottom:8px;
+  }
+  input[type=text]{
+    width:100%; background:#0c0b10; border:1px solid var(--line); color:#f3efe6;
+    padding:14px 16px; border-radius:12px; font-size:1.4rem; letter-spacing:.15em;
+    font-family:'Helvetica Neue', Arial, sans-serif; text-transform:uppercase; text-align:center;
+    margin-bottom:16px;
+  }
+  input[type=text]:focus{ outline:none; border-color:var(--amber-dim); }
+  .btn{
+    width:100%; padding:14px; border-radius:12px; border:none; cursor:pointer;
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.95rem; font-weight:600;
+    letter-spacing:.02em;
+  }
+  .btn-primary{ background: linear-gradient(180deg, #f0b268, var(--amber)); color:#1a1206; }
+  .btn-primary:active{ transform: scale(.98); }
+  .btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--moon-dim); margin-top:10px; }
+  .code-display{
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:2.3rem; letter-spacing:.22em;
+    text-align:center; color:#f3efe6; background:#0c0b10; border:1px dashed var(--amber-dim);
+    border-radius:14px; padding:18px 10px; margin: 10px 0 18px;
+  }
+  .status-row{ display:flex; align-items:center; gap:8px; font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; color:var(--moon-dim); margin-bottom:14px;}
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--moon-dim); flex:none; }
+  .dot.connecting{ background: var(--amber); animation: pulse 1.4s infinite; }
+  .dot.live{ background: var(--ok); }
+  .dot.error{ background: var(--alert); }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  video{
+    width:100%; border-radius:14px; background:#000; display:block;
+    aspect-ratio: 4/3; object-fit:cover; margin-bottom:14px;
+  }
+  .meter-wrap{ margin-bottom:16px; }
+  .meter{
+    width:100%; height:14px; background:#0c0b10; border:1px solid var(--line);
+    border-radius:8px; overflow:hidden; position:relative;
+  }
+  .meter-fill{
+    height:100%; width:0%; background: linear-gradient(90deg, var(--ok), var(--amber), var(--alert));
+    transition: width .08s linear;
+  }
+  .threshold-row{ display:flex; align-items:center; gap:10px; margin-top:10px; font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim);}
+  input[type=range]{ flex:1; accent-color: var(--amber); }
+  .toggle-row{
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; color:var(--moon);
+    padding:10px 0; border-top:1px solid var(--line); margin-top:6px;
+  }
+  .switch{ position:relative; width:42px; height:24px; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider{ position:absolute; inset:0; background:#2a2732; border-radius:20px; cursor:pointer; transition:.2s; }
+  .slider:before{ content:""; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#f3efe6; border-radius:50%; transition:.2s; }
+  input:checked + .slider{ background: var(--amber-dim); }
+  input:checked + .slider:before{ transform: translateX(18px); background: var(--amber); }
+  .alert-flash{
+    position:fixed; inset:0; background: radial-gradient(circle, rgba(232,102,77,.35), transparent 70%);
+    pointer-events:none; opacity:0; transition:opacity .15s;
+  }
+  .alert-flash.on{ opacity:1; }
+  .hint{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.78rem; color:var(--moon-dim); text-align:center; margin-top:16px; line-height:1.5; }
+  .video-wrap{ position:relative; margin-bottom:14px; }
+  .video-wrap video{ margin-bottom:0; }
+  .black-overlay{
+    position:absolute; inset:0; background:#000; border-radius:14px;
+    display:none; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    cursor:pointer; border:1px solid var(--line);
+  }
+  .black-overlay .moon{ font-size:2rem; opacity:.7; }
+  .black-overlay .black-text{
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim); text-align:center; line-height:1.5;
+  }
+  .black-overlay .black-text span{ font-size:.72rem; opacity:.7; }
+  .history-wrap{ margin-top:16px; }
+  .history-list{
+    max-height:150px; overflow-y:auto; background:#0c0b10; border:1px solid var(--line);
+    border-radius:12px; padding:4px 14px;
+  }
+  .history-item{
+    display:flex; align-items:center; gap:8px; padding:9px 0; font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:.85rem; color:var(--moon); border-bottom:1px solid var(--line);
+  }
+  .history-item:last-child{ border-bottom:none; }
+  .history-dot{ width:6px; height:6px; border-radius:50%; background:var(--alert); flex:none; }
+  .history-empty{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim); padding:14px 0; text-align:center; }
+  .history-clear{
+    background:none; border:none; color:var(--moon-dim); font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:8px; padding:0;
+  }
+  .back{
+    position:fixed; top:18px; left:18px; z-index:2; background:none; border:none; color:var(--moon-dim);
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; cursor:pointer;
+  }
+</style>
+</head>
+<body>
+<div class="stars"></div>
+<div class="alert-flash" id="alertFlash"></div>
+
+<div id="app"></div>
+
+<script>
+const STUN = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const app = document.getElementById('app');
+const alertFlash = document.getElementById('alertFlash');
+
+let pc = null, localStream = null, remoteStream = null;
+let pollTimers = [];
+let audioCtx = null, analyser = null, meterRaf = null;
+
+function clearTimers(){ pollTimers.forEach(t => clearInterval(t)); pollTimers = []; }
+function stopEverything(){
+  clearTimers();
+  if (meterRaf) cancelAnimationFrame(meterRaf);
+  if (pc) { try{ pc.close(); }catch(e){} pc = null; }
+  if (localStream) { localStream.getTracks().forEach(t=>t.stop()); localStream = null; }
+  if (audioCtx) { try{ audioCtx.close(); }catch(e){} audioCtx = null; }
+}
+window.addEventListener('beforeunload', stopEverything);
+
+function randomCode(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = '';
+  for (let i=0;i<5;i++) c += chars[Math.floor(Math.random()*chars.length)];
+  return c;
+}
+
+async function storageGet(key){
+  try{
+    const r = await window.storage.get(key, true);
+    return r ? r.value : null;
+  }catch(e){ return null; }
+}
+async function storageSet(key, value){
+  try{ await window.storage.set(key, value, true); }catch(e){ console.error('storage set failed', e); }
+}
+async function storageDelete(key){
+  try{ await window.storage.delete(key, true); }catch(e){}
+}
+
+// Personal (non-shared) storage — used for this device's own alert history
+async function storageGetLocal(key){
+  try{
+    const r = await window.storage.get(key, false);
+    return r ? r.value : null;
+  }catch(e){ return null; }
+}
+async function storageSetLocal(key, value){
+  try{ await window.storage.set(key, value, false); }catch(e){}
+}
+async function storageDeleteLocal(key){
+  try{ await window.storage.delete(key, false); }catch(e){}
+}
+
+let alertHistory = [];
+let currentRoomCode = null;
+let blackModeOn = false;
+
+// ---------- SCREENS ----------
+
+function renderHome(){
+  stopEverything();
+  app.innerHTML = `
+    <div class="eyebrow">Veilleuse</div>
+    <h1>Babyphone maison</h1>
+    <div class="sub">Deux téléphones, une connexion directe. Aucune vidéo ne transite par un serveur — le flux va d'un appareil à l'autre.</div>
+    <div class="choice-row">
+      <button class="choice-btn" id="btnCam">
+        <div class="glyph">📹</div>
+        <div><div>Caméra</div><small>À poser dans la chambre</small></div>
+      </button>
+      <button class="choice-btn" id="btnScreen">
+        <div class="glyph">🌙</div>
+        <div><div>Écran</div><small>Pour surveiller à distance</small></div>
+      </button>
+    </div>
+    <div class="hint">Astuce : utilisez les deux téléphones sur le même Wi-Fi pour une connexion plus fiable.</div>
+  `;
+  document.getElementById('btnCam').onclick = renderCameraSetup;
+  document.getElementById('btnScreen').onclick = renderScreenSetup;
+}
+
+function renderCameraSetup(){
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Caméra</div>
+    <h1>Chambre de bébé</h1>
+    <div class="sub">Autorisez la caméra et le micro, puis posez le téléphone face au lit.</div>
+    <div class="card">
+      <button class="btn btn-primary" id="startCam">Démarrer la caméra</button>
+    </div>
+  `;
+  document.getElementById('back').onclick = renderHome;
+  document.getElementById('startCam').onclick = startCamera;
+}
+
+function renderScreenSetup(){
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Écran</div>
+    <h1>Surveillance</h1>
+    <div class="sub">Entrez le code affiché sur le téléphone-caméra.</div>
+    <div class="card">
+      <label>Code de connexion</label>
+      <input type="text" id="codeInput" maxlength="5" placeholder="ABCDE">
+      <button class="btn btn-primary" id="connectBtn">Se connecter</button>
+    </div>
+  `;
+  document.getElementById('back').onclick = renderHome;
+  document.getElementById('codeInput').addEventListener('input', e=>{
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
+  });
+  document.getElementById('connectBtn').onclick = () => {
+    const code = document.getElementById('codeInput').value.trim();
+    if (code.length < 4) { alert('Entrez le code à 5 caractères affiché sur la caméra.'); return; }
+    startScreen(code);
+  };
+}
+
+// ---------- CAMERA ROLE ----------
+
+async function startCamera(){
+  const code = randomCode();
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Caméra active</div>
+    <h1>Code : partagez-le</h1>
+    <div class="code-display">${code}</div>
+    <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">En attente d'initialisation de la caméra…</span></div>
+    <video id="localVideo" autoplay playsinline muted></video>
+    <div class="hint">Entrez ce code sur le téléphone-écran. Laissez cette page ouverte tant que la surveillance est active.</div>
+  `;
+  document.getElementById('back').onclick = () => { stopEverything(); renderHome(); };
+
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
+
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: true });
+  }catch(e){
+    setStatus('Impossible d\'accéder à la caméra/micro. Vérifiez les autorisations.', 'error');
+    return;
+  }
+  document.getElementById('localVideo').srcObject = localStream;
+  setStatus('Caméra prête. En attente de connexion de l\'écran…', 'connecting');
+
+  pc = new RTCPeerConnection(STUN);
+  localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+
+  pc.onicecandidate = async (e) => {
+    if (!e.candidate) return;
+    const existing = JSON.parse((await storageGet(`room:${code}:cand:camera`)) || '[]');
+    existing.push(e.candidate.toJSON());
+    await storageSet(`room:${code}:cand:camera`, JSON.stringify(existing));
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') setStatus('Connecté ✅ — l\'écran reçoit l\'image.', 'live');
+    else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') setStatus('Connexion perdue. Rechargez pour réessayer.', 'error');
+  };
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  await storageSet(`room:${code}:offer`, JSON.stringify({ sdp: offer.sdp, type: offer.type }));
+
+  let answerApplied = false;
+  let appliedCandCount = 0;
+
+  const t1 = setInterval(async () => {
+    if (answerApplied) return;
+    const raw = await storageGet(`room:${code}:answer`);
+    if (!raw) return;
+    answerApplied = true;
+    const answer = JSON.parse(raw);
+    await pc.setRemoteDescription(new RTCSessionDescription(answer));
+    setStatus('Réponse reçue, établissement de la connexion…', 'connecting');
+  }, 1500);
+
+  const t2 = setInterval(async () => {
+    if (!answerApplied) return;
+    const raw = await storageGet(`room:${code}:cand:screen`);
+    if (!raw) return;
+    const list = JSON.parse(raw);
+    for (let i = appliedCandCount; i < list.length; i++) {
+      try{ await pc.addIceCandidate(new RTCIceCandidate(list[i])); }catch(e){}
+    }
+    appliedCandCount = list.length;
+  }, 1500);
+
+  pollTimers.push(t1, t2);
+}
+
+// ---------- SCREEN ROLE ----------
+
+async function startScreen(code){
+  currentRoomCode = code;
+  blackModeOn = false;
+  alertHistory = JSON.parse((await storageGetLocal(`alerts:${code}`)) || '[]');
+
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Écran — code ${code}</div>
+    <h1>Surveillance en direct</h1>
+    <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">Recherche de la caméra…</span></div>
+    <div class="video-wrap" id="videoWrap">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="black-overlay" id="blackOverlay">
+        <div class="moon">🌙</div>
+        <div class="black-text">Écran noir actif<br><span>Le son reste surveillé — touchez pour rallumer</span></div>
+      </div>
+    </div>
+    <div class="meter-wrap">
+      <label>Niveau sonore</label>
+      <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="threshold-row">
+        <span>Seuil d'alerte</span>
+        <input type="range" id="threshold" min="10" max="90" value="55">
+      </div>
+      <div class="toggle-row">
+        <span>Alerte vibration + son</span>
+        <label class="switch"><input type="checkbox" id="alertToggle" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span>Écran noir (économie batterie)</span>
+        <label class="switch"><input type="checkbox" id="blackToggle"><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="history-wrap">
+      <label>Historique des alertes</label>
+      <div id="historyList" class="history-list"></div>
+      <button class="history-clear" id="clearHistory">Effacer l'historique</button>
+    </div>
+    <div class="hint">Gardez cet onglet ouvert pour continuer à recevoir l'image et les alertes.</div>
+  `;
+  document.getElementById('back').onclick = () => { stopEverything(); renderHome(); };
+
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
+
+  renderHistory();
+  document.getElementById('clearHistory').onclick = async () => {
+    alertHistory = [];
+    await storageSetLocal(`alerts:${code}`, '[]');
+    renderHistory();
+  };
+
+  const blackToggle = document.getElementById('blackToggle');
+  const blackOverlay = document.getElementById('blackOverlay');
+  blackToggle.onchange = () => setBlackMode(blackToggle.checked);
+  blackOverlay.onclick = () => { blackToggle.checked = false; setBlackMode(false); };
+
+  pc = new RTCPeerConnection(STUN);
+  const remoteVideoEl = document.getElementById('remoteVideo');
+  remoteStream = new MediaStream();
+  remoteVideoEl.srcObject = remoteStream;
+
+  pc.ontrack = (e) => {
+    remoteStream.addTrack(e.track);
+    if (e.track.kind === 'video' && blackModeOn) e.track.enabled = false;
+    if (e.track.kind === 'audio') setupMeter(remoteStream);
+  };
+
+  pc.onicecandidate = async (e) => {
+    if (!e.candidate) return;
+    const existing = JSON.parse((await storageGet(`room:${code}:cand:screen`)) || '[]');
+    existing.push(e.candidate.toJSON());
+    await storageSet(`room:${code}:cand:screen`, JSON.stringify(existing));
+  };
+
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'connected') setStatus('Connecté ✅ — image en direct.', 'live');
+    else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') setStatus('Connexion perdue. Rechargez pour réessayer.', 'error');
+  };
+
+  let offerApplied = false;
+  let appliedCandCount = 0;
+
+  const t1 = setInterval(async () => {
+    if (offerApplied) return;
+    const raw = await storageGet(`room:${code}:offer`);
+    if (!raw) return;
+    offerApplied = true;
+    const offer = JSON.parse(raw);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    await storageSet(`room:${code}:answer`, JSON.stringify({ sdp: answer.sdp, type: answer.type }));
+    setStatus('Caméra trouvée, établissement de la connexion…', 'connecting');
+  }, 1500);
+
+  const t2 = setInterval(async () => {
+    if (!offerApplied) return;
+    const raw = await storageGet(`room:${code}:cand:camera`);
+    if (!raw) return;
+    const list = JSON.parse(raw);
+    for (let i = appliedCandCount; i < list.length; i++) {
+      try{ await pc.addIceCandidate(new RTCIceCandidate(list[i])); }catch(e){}
+    }
+    appliedCandCount = list.length;
+  }, 1500);
+
+  pollTimers.push(t1, t2);
+}
+
+function setupMeter(stream){
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const meterFill = document.getElementById('meterFill');
+  let lastAlert = 0;
+
+  function loop(){
+    analyser.getByteFrequencyData(data);
+    const avg = data.reduce((a,b)=>a+b,0) / data.length;
+    const pct = Math.min(100, Math.round((avg / 90) * 100));
+    if (meterFill) meterFill.style.width = pct + '%';
+
+    const thresholdEl = document.getElementById('threshold');
+    const toggleEl = document.getElementById('alertToggle');
+    const threshold = thresholdEl ? Number(thresholdEl.value) : 55;
+
+    if (pct > threshold && toggleEl && toggleEl.checked) {
+      const now = Date.now();
+      if (now - lastAlert > 1800) {
+        lastAlert = now;
+        triggerAlert();
+      }
+    }
+    meterRaf = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function triggerAlert(){
+  alertFlash.classList.add('on');
+  setTimeout(()=>alertFlash.classList.remove('on'), 400);
+  if (navigator.vibrate) navigator.vibrate([120,60,120]);
+  try{
+    const beepCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = beepCtx.createOscillator();
+    const gain = beepCtx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, beepCtx.currentTime);
+    osc.connect(gain); gain.connect(beepCtx.destination);
+    osc.start();
+    osc.stop(beepCtx.currentTime + 0.25);
+    osc.onended = () => beepCtx.close();
+  }catch(e){}
+  logAlert();
+}
+
+async function logAlert(){
+  if (!currentRoomCode) return;
+  alertHistory.push(new Date().toISOString());
+  if (alertHistory.length > 20) alertHistory = alertHistory.slice(-20);
+  await storageSetLocal(`alerts:${currentRoomCode}`, JSON.stringify(alertHistory));
+  renderHistory();
+}
+
+function renderHistory(){
+  const list = document.getElementById('historyList');
+  if (!list) return;
+  if (alertHistory.length === 0){
+    list.innerHTML = '<div class="history-empty">Aucune alerte pour l\'instant.</div>';
+    return;
+  }
+  list.innerHTML = alertHistory.slice().reverse().map(ts => {
+    const d = new Date(ts);
+    const time = d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const dateLabel = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+    return `<div class="history-item"><span class="history-dot"></span>${time} <span style="color:var(--moon-dim); margin-left:auto;">${dateLabel}</span></div>`;
+  }).join('');
+}
+
+function setBlackMode(on){
+  blackModeOn = on;
+  const remoteVideoEl = document.getElementById('remoteVideo');
+  const blackOverlay = document.getElementById('blackOverlay');
+  if (!remoteVideoEl || !blackOverlay) return;
+  if (on){
+    blackOverlay.style.display = 'flex';
+    if (remoteStream) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
+  } else {
+    blackOverlay.style.display = 'none';
+    if (remoteStream) remoteStream.getVideoTracks().forEach(t => t.enabled = true);
+  }
+}
+
+renderHome();
+</script>
+</body>
+</html>
