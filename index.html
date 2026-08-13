@@ -325,11 +325,14 @@ function renderCameraSetup(){
     <h1>Chambre de bébé</h1>
     <div class="sub">Autorisez la caméra et le micro, puis posez le téléphone face au lit.</div>
     <div class="card">
-      <button class="btn btn-primary" id="startCam">Démarrer la caméra</button>
+      <label>Quelle caméra utiliser ?</label>
+      <button class="btn btn-primary" id="startCamBack" style="margin-bottom:10px;">📷 Caméra arrière</button>
+      <button class="btn btn-ghost" id="startCamFront">🤳 Caméra frontale (selfie)</button>
     </div>
   `;
   document.getElementById('back').onclick = renderHome;
-  document.getElementById('startCam').onclick = startCamera;
+  document.getElementById('startCamBack').onclick = () => startCamera('environment');
+  document.getElementById('startCamFront').onclick = () => startCamera('user');
 }
 
 function renderScreenSetup(){
@@ -357,8 +360,9 @@ function renderScreenSetup(){
 
 // ---------- CAMERA ROLE ----------
 
-async function startCamera(){
+async function startCamera(facingMode){
   const code = randomCode();
+  let currentFacingMode = facingMode || 'environment';
   app.innerHTML = `
     <button class="back" id="back">← Retour</button>
     <div class="eyebrow">Caméra active</div>
@@ -372,6 +376,7 @@ async function startCamera(){
         <div class="black-text">Mode économie actif<br><span>La caméra continue d'envoyer l'image — touchez pour revoir l'aperçu</span></div>
       </div>
     </div>
+    <button class="btn btn-ghost" id="switchCamBtn" style="margin-bottom:14px;">🔄 Changer de caméra (avant/arrière)</button>
     <div class="toggle-row">
       <span>Mode économie d'énergie</span>
       <label class="switch"><input type="checkbox" id="ecoToggle"><span class="slider"></span></label>
@@ -385,30 +390,54 @@ async function startCamera(){
   const dot = document.getElementById('dot');
   const statusText = document.getElementById('statusText');
   const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
+  const localVideoEl = document.getElementById('localVideo');
+
+  function videoConstraints(fm, eco){
+    return eco
+      ? { facingMode: fm, width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 8, max: 8 } }
+      : { facingMode: fm, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 15 } };
+  }
 
   try{
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 640 },
-        height: { ideal: 480 },
-        frameRate: { ideal: 15, max: 15 }
-      },
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false
-      }
+      video: videoConstraints(currentFacingMode, false),
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
     });
   }catch(e){
     setStatus("Impossible d'accéder à la caméra/micro. Vérifiez les autorisations du site.", 'error');
     return;
   }
-  document.getElementById('localVideo').srcObject = localStream;
+  localVideoEl.srcObject = localStream;
+  localVideoEl.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
   setStatus('Caméra prête. Connexion au service de mise en relation…', 'connecting');
 
   requestWakeLock();
   document.addEventListener('visibilitychange', reacquireWakeLockIfNeeded);
+
+  document.getElementById('switchCamBtn').onclick = async () => {
+    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+    const eco = document.getElementById('ecoToggle').checked;
+    try{
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints(currentFacingMode, eco),
+        audio: false
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      const oldVideoTrack = localStream.getVideoTracks()[0];
+      localStream.removeTrack(oldVideoTrack);
+      oldVideoTrack.stop();
+      localStream.addTrack(newVideoTrack);
+      localVideoEl.srcObject = null;
+      localVideoEl.srcObject = localStream;
+      localVideoEl.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+      if (call && call.peerConnection) {
+        const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) await sender.replaceTrack(newVideoTrack);
+      }
+    }catch(e){
+      setStatus('Impossible de changer de caméra : ' + e.message, 'error');
+    }
+  };
 
   const ecoToggle = document.getElementById('ecoToggle');
   const camBlackOverlay = document.getElementById('camBlackOverlay');
