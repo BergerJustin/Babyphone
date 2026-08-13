@@ -843,9 +843,13 @@ function triggerAlert(){
 
 function logAlertToServer(){
   const isoTime = new Date().toISOString();
+  console.log("Tentative d'envoi d'alerte à la caméra...", dataConn);
+  
   if (dataConn && dataConn.open) {
-    // Émission de l'événement sonore vers le smartphone Caméra pour archivage RAM
     dataConn.send({ type: 'new_alert', timestamp: isoTime });
+    console.log("Alerte envoyée avec succès !");
+  } else {
+    console.warn("Échec : le canal dataConn n'est pas ouvert.", dataConn ? dataConn.open : "dataConn nul");
   }
 }
 
