@@ -417,15 +417,18 @@ async function startCamera(facingMode){
   document.getElementById('switchCamBtn').onclick = async () => {
     currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
     const eco = document.getElementById('ecoToggle').checked;
+    const oldVideoTrack = localStream.getVideoTracks()[0];
+    if (oldVideoTrack) {
+      oldVideoTrack.stop();
+      localStream.removeTrack(oldVideoTrack);
+    }
+    await new Promise(r => setTimeout(r, 200));
     try{
       const newStream = await navigator.mediaDevices.getUserMedia({
         video: videoConstraints(currentFacingMode, eco),
         audio: false
       });
       const newVideoTrack = newStream.getVideoTracks()[0];
-      const oldVideoTrack = localStream.getVideoTracks()[0];
-      localStream.removeTrack(oldVideoTrack);
-      oldVideoTrack.stop();
       localStream.addTrack(newVideoTrack);
       localVideoEl.srcObject = null;
       localVideoEl.srcObject = localStream;
