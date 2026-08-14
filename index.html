@@ -225,15 +225,13 @@ let peer = null, call = null, dataConn = null;
 let localStream = null, remoteStream = null;
 let audioCtx = null, analyser = null, meterRaf = null;
 
-// --- STOCKAGE EN RAM CÔTÉ CAMÉRA ---
 const MAX_ALERTES = 50;
 let cameraAlertHistory = []; 
-let screenAlertHistory = []; // Tampon miroir affiché côté Écran
+let screenAlertHistory = [];
 
 let currentRoomCode = null;
 let blackModeOn = false;
 
-// Gestion de la batterie & durée de fonctionnement
 let batteryManager = null, batteryReportInterval = null;
 let batteryLevelListener = null, batteryChargingListener = null;
 let lowBatteryAlerted = false;
@@ -254,10 +252,8 @@ function stopEverything(){
     if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
     batteryManager = null;
   }
-  // Vidage explicite de la mémoire RAM lors du réarmement / arrêt de la caméra
   cameraAlertHistory = [];
   screenAlertHistory = [];
-  
   lowBatteryAlerted = false;
   cameraStartTime = null;
   if (wakeLock) { try{ wakeLock.release(); }catch(e){} wakeLock = null; }
@@ -320,57 +316,29 @@ function formatDuration(ms) {
   return `${hrs.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
 }
 
-/*async function setupBatteryReporting(conn){
-  dataConn = conn;
-  if (batteryReportInterval) clearInterval(batteryReportInterval);
-  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
-
-  if (!batteryManager) {
-    try{
-      batteryManager = await navigator.getBattery();
-      batteryLevelListener = () => sendBatteryStatus();
-      batteryChargingListener = () => sendBatteryStatus();
-      batteryManager.addEventListener('levelchange', batteryLevelListener);
-      batteryManager.addEventListener('chargingchange', batteryChargingListener);
-    }catch(e){}
-  }
-  sendBatteryStatus();
-  
-  // Dès le premier handshake, la caméra expédie son historique RAM au nouvel écran
-  sendHistoryToScreen();
-}*/
-
 async function setupBatteryReporting(conn){
   dataConn = conn;
   if (batteryReportInterval) clearInterval(batteryReportInterval);
   
-  // 1. Envoi immédiat du temps de fonctionnement (uptime) sans attendre l'API Batterie
+  // 1. Envoi immédiat des données système
   sendBatteryStatus();
 
-  // 2. Essai de récupération de l'API batterie
+  // 2. Tente de se connecter à l'API Batterie
   if ('getBattery' in navigator) {
     try {
       batteryManager = await navigator.getBattery();
-      
-      // Nettoyage des anciens écouteurs
-      if (batteryLevelListener) batteryManager.removeEventListener('levelchange', batteryLevelListener);
-      if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
-
       batteryLevelListener = () => sendBatteryStatus();
       batteryChargingListener = () => sendBatteryStatus();
-
       batteryManager.addEventListener('levelchange', batteryLevelListener);
       batteryManager.addEventListener('chargingchange', batteryChargingListener);
-      
-      // Mise à jour avec les vraies valeurs de batterie
       sendBatteryStatus();
     } catch(e) {
-      console.warn("API Batterie accessible mais refusée :", e);
+      console.warn("API batterie refusée :", e);
     }
   }
 
-  // 3. Boucle de rappel toutes les 30 secondes
-  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
+  batteryReportInterval = setInterval(sendBatteryStatus, 15000);
+  sendHistoryToScreen();
 }
 
 function sendBatteryStatus(){
@@ -395,8 +363,6 @@ function randomCode(){
   for (let i=0;i<5;i++) c += chars[Math.floor(Math.random()*chars.length)];
   return c;
 }
-
-// ---------- HOME ----------
 
 function renderHome(){
   stopEverything();
@@ -460,14 +426,11 @@ function renderScreenSetup(){
   };
 }
 
-// ---------- CAMERA ROLE ----------
-
 async function startCamera(facingMode){
   const code = randomCode();
   cameraStartTime = Date.now();
   let currentFacingMode = facingMode || 'environment';
 
-  // L'historique RAM démarrant à zéro à chaque lancement
   cameraAlertHistory = [];
 
   app.innerHTML = `
@@ -496,9 +459,7 @@ async function startCamera(facingMode){
       <span>Mode économie d'énergie</span>
       <label class="switch"><input type="checkbox" id="ecoToggle"><span class="slider"></span></label>
     </div>
-    <div class="hint">Entrez ce code sur le téléphone-écran. Laissez cette page ouverte tant que la surveillance est active — l'écran doit rester allumé pour que la caméra continue de fonctionner.</div>
-    <div class="hint">🕐 L'aperçu s'assombrit automatiquement après 1 minute sans y toucher (le flux vers l'écran-parent continue). Touchez l'écran pour le rallumer.</div>
-    <div class="hint">💡 Pour une autonomie maximale, laissez ce téléphone branché au chargeur.</div>
+    <div class="hint">Entrez ce code sur le téléphone-écran. Laissez cette page ouverte tant que la surveillance est active.</div>
   `;
   document.getElementById('back').onclick = () => { 
     stopEverything(); 
@@ -527,12 +488,12 @@ async function startCamera(facingMode){
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
     });
   }catch(e){
-    setStatus("Impossible d'accéder à la caméra/micro. Vérifiez les autorisations du site.", 'error');
+    setStatus("Impossible d'accéder à la caméra/micro.", 'error');
     return;
   }
   localVideoEl.srcObject = localStream;
   localVideoEl.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
-  setStatus('Caméra prête. Connexion au service de mise en relation…', 'connecting');
+  setStatus('Caméra prête. Connexion au réseau…', 'connecting');
 
   requestWakeLock();
   document.addEventListener('visibilitychange', reacquireWakeLockIfNeeded);
@@ -561,7 +522,7 @@ async function startCamera(facingMode){
         if (sender) await sender.replaceTrack(newVideoTrack);
       }
     }catch(e){
-      setStatus('Impossible de changer de caméra : ' + e.message, 'error');
+      setStatus('Erreur changement caméra : ' + e.message, 'error');
     }
   };
 
@@ -577,43 +538,26 @@ async function startCamera(facingMode){
   peer = new Peer(PEER_PREFIX + code);
 
   peer.on('open', () => {
-    setStatus("Caméra prête. En attente de connexion de l'écran…", 'connecting');
+    setStatus("Caméra prête. En attente de l'écran…", 'connecting');
   });
 
   peer.on('call', incomingCall => {
     call = incomingCall;
     call.answer(localStream);
-    setStatus('Connecté ✅ — l\'écran reçoit l\'image.', 'live');
+    setStatus('Connecté ✅ — Transmission vidéo active.', 'live');
     call.on('close', () => setStatus('Écran déconnecté.', 'connecting'));
   });
 
-  /*peer.on('connection', conn => {
-    dataConn = conn; // On stocke la référence active
-    
-    conn.on('open', () => {
-      setupBatteryReporting(conn);
-    });
-    
-    // On place l'écouteur directement sur 'conn' plutôt que d'attendre
-    conn.on('data', data => {
-      console.log("Donnée reçue par la caméra :", data);
-      if (data && data.type === 'new_alert') {
-        recordAlertOnCamera(data.timestamp);
-      }
-    });
-  });*/
-
   peer.on('connection', conn => {
     dataConn = conn;
-
-    // Lancement de la batterie dès la connexion
+    
+    const initChannel = () => setupBatteryReporting(conn);
     if (conn.open) {
-      setupBatteryReporting(conn);
+      initChannel();
     } else {
-      conn.on('open', () => setupBatteryReporting(conn));
+      conn.on('open', initChannel);
     }
 
-    // Traitement des alertes
     conn.on('data', data => {
       if (data && data.type === 'new_alert') {
         recordAlertOnCamera(data.timestamp);
@@ -622,31 +566,22 @@ async function startCamera(facingMode){
   });
 
   peer.on('error', err => {
-    if (err.type === 'unavailable-id') {
-      setStatus('Ce code est déjà utilisé, rechargez la page pour en générer un autre.', 'error');
-    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'disconnected') {
-      setStatus('Problème de connexion au service. Nouvelle tentative…', 'error');
-    } else {
-      setStatus('Erreur : ' + err.type, 'error');
-    }
+    setStatus('Erreur : ' + err.type, 'error');
   });
 
   peer.on('disconnected', () => {
-    setStatus('Connexion au service perdue, reconnexion…', 'connecting');
+    setStatus('Connexion perdue, reconnexion…', 'connecting');
     try{ peer.reconnect(); }catch(e){}
   });
 }
 
-// Consignation en mémoire RAM sur le téléphone Caméra
 function recordAlertOnCamera(isoTimestamp){
   cameraAlertHistory.push(isoTimestamp);
   if (cameraAlertHistory.length > MAX_ALERTES) {
-    cameraAlertHistory.shift(); // Conservation stricte des 50 dernières alertes
+    cameraAlertHistory.shift();
   }
   sendHistoryToScreen();
 }
-
-// ---------- SCREEN ROLE ----------
 
 async function startScreen(code){
   currentRoomCode = code;
@@ -662,7 +597,7 @@ async function startScreen(code){
     <div class="info-box" id="camInfoBox">
       <div class="info-row">
         <span>⚡ Batterie Caméra</span>
-        <strong id="battText">Chargement…</strong>
+        <strong id="battText">En attente des données…</strong>
       </div>
       <div class="battery-bar-wrap">
         <div class="battery-bar-fill" id="battFill"></div>
@@ -701,7 +636,7 @@ async function startScreen(code){
       <label>Historique des alertes (stocké sur la caméra)</label>
       <div id="historyList" class="history-list"></div>
     </div>
-    <div class="hint">Gardez cet onglet ouvert pour continuer à recevoir l'image et les alertes.</div>
+    <div class="hint">Gardez cet onglet ouvert pour continuer la surveillance.</div>
   `;
   document.getElementById('back').onclick = () => { stopEverything(); renderHome(); };
 
@@ -738,25 +673,14 @@ function connectToCamera(code, setStatus){
   const retryWrap = document.getElementById('retryWrap');
   retryWrap.innerHTML = '';
 
-  if (typeof Peer === 'undefined') {
-    showRetry(code, setStatus, "La bibliothèque de connexion n'a pas pu se charger. Vérifiez votre connexion internet.");
-    return;
-  }
-
   let dummyStream;
   try{
     dummyStream = createDummyStream();
   }catch(e){
-    setStatus('Préparation du flux impossible (' + e.message + '), tentative simplifiée…', 'connecting');
     dummyStream = new MediaStream();
   }
 
-  try{
-    peer = new Peer();
-  }catch(e){
-    showRetry(code, setStatus, 'Impossible de créer la connexion : ' + e.message);
-    return;
-  }
+  peer = new Peer();
 
   peer.on('open', () => {
     try{
@@ -768,26 +692,19 @@ function connectToCamera(code, setStatus){
       call.on('stream', stream => {
         remoteStream = stream;
         document.getElementById('remoteVideo').srcObject = remoteStream;
-        setStatus('Connecté ✅ — image en direct.', 'live');
+        setStatus('Connecté ✅ — Image en direct.', 'live');
         if (blackModeOn) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
         if (remoteStream.getAudioTracks().length) setupMeter(remoteStream);
       });
 
       call.on('close', () => setStatus('Connexion perdue.', 'error'));
-      call.on('error', () => showRetry(code, setStatus, "Erreur de connexion à la caméra."));
     }catch(e){
-      showRetry(code, setStatus, "Impossible d'appeler la caméra : " + e.message);
+      showRetry(code, setStatus, "Erreur appel : " + e.message);
     }
   });
 
   peer.on('error', err => {
-    if (err.type === 'peer-unavailable') {
-      showRetry(code, setStatus, "Caméra introuvable. Vérifiez le code, ou que la caméra est bien démarrée.");
-    } else if (err.type === 'network' || err.type === 'server-error') {
-      showRetry(code, setStatus, 'Problème de connexion au service.');
-    } else {
-      showRetry(code, setStatus, 'Erreur : ' + err.type);
-    }
+    showRetry(code, setStatus, 'Erreur : ' + err.type);
   });
 }
 
@@ -803,7 +720,7 @@ function handleIncomingData(data){
 
     if (battText && battFill) {
       if (!data.batterySupported) {
-        battText.textContent = "Non disponible";
+        battText.textContent = "Non disponible (Restriction iOS / Navigateur)";
         battFill.style.width = "0%";
       } else {
         const pct = Math.round(data.level * 100);
@@ -816,7 +733,7 @@ function handleIncomingData(data){
           if (!data.charging && !lowBatteryAlerted) {
             lowBatteryAlerted = true;
             triggerAlert();
-            alert('⚠️ Batterie caméra faible (' + pct + '%) ! Veuillez la brancher.');
+            alert('⚠️ Batterie caméra faible (' + pct + '%) !');
           }
         } else if (pct <= 30) {
           battFill.style.backgroundColor = "var(--amber)";
@@ -828,7 +745,6 @@ function handleIncomingData(data){
       }
     }
   } else if (data.type === 'history_sync') {
-    // Réception de l'historique complet provenant directement de la RAM de la caméra
     screenAlertHistory = data.history || [];
     renderHistory();
   }
@@ -899,13 +815,8 @@ function triggerAlert(){
 
 function logAlertToServer(){
   const isoTime = new Date().toISOString();
-  console.log("Tentative d'envoi d'alerte à la caméra...", dataConn);
-  
   if (dataConn && dataConn.open) {
     dataConn.send({ type: 'new_alert', timestamp: isoTime });
-    console.log("Alerte envoyée avec succès !");
-  } else {
-    console.warn("Échec : le canal dataConn n'est pas ouvert.", dataConn ? dataConn.open : "dataConn nul");
   }
 }
 
