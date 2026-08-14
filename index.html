@@ -427,6 +427,17 @@ function renderScreenSetup(){
 }
 
 async function startCamera(facingMode){
+  // 🔍 TEST BATTERIE FIREFOX :
+  const hasBatteryAPI = 'getBattery' in navigator;
+  alert("API Battery disponible dans Firefox ? " + hasBatteryAPI);
+  if (hasBatteryAPI) {
+    navigator.getBattery().then(b => {
+      alert("Niveau : " + Math.round(b.level * 100) + "% | Charge : " + b.charging);
+    }).catch(err => {
+      alert("Erreur getBattery : " + err.message);
+    });
+  }
+
   const code = randomCode();
   cameraStartTime = Date.now();
   let currentFacingMode = facingMode || 'environment';
