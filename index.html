@@ -133,7 +133,6 @@
     aspect-ratio: 4/3; object-fit:cover; margin-bottom:0;
   }
   
-  /* Widget Infos Caméra */
   .info-box{
     background: #0c0b10; border: 1px solid var(--line);
     border-radius: 14px; padding: 12px 16px; margin-bottom: 16px;
@@ -201,10 +200,6 @@
   .history-item:last-child{ border-bottom:none; }
   .history-dot{ width:6px; height:6px; border-radius:50%; background:var(--alert); flex:none; }
   .history-empty{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim); padding:14px 0; text-align:center; }
-  .history-clear{
-    background:none; border:none; color:var(--moon-dim); font-family:'Helvetica Neue', Arial, sans-serif;
-    font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:8px; padding:0;
-  }
   .retry-btn{ margin-top:14px; }
 </style>
 </head>
@@ -229,7 +224,12 @@ const alertFlash = document.getElementById('alertFlash');
 let peer = null, call = null, dataConn = null;
 let localStream = null, remoteStream = null;
 let audioCtx = null, analyser = null, meterRaf = null;
-let alertHistory = [];
+
+// --- STOCKAGE EN RAM CÔTÉ CAMÉRA ---
+const MAX_ALERTES = 50;
+let cameraAlertHistory = []; 
+let screenAlertHistory = []; // Tampon miroir affiché côté Écran
+
 let currentRoomCode = null;
 let blackModeOn = false;
 
@@ -254,6 +254,10 @@ function stopEverything(){
     if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
     batteryManager = null;
   }
+  // Vidage explicite de la mémoire RAM lors du réarmement / arrêt de la caméra
+  cameraAlertHistory = [];
+  screenAlertHistory = [];
+  
   lowBatteryAlerted = false;
   cameraStartTime = null;
   if (wakeLock) { try{ wakeLock.release(); }catch(e){} wakeLock = null; }
@@ -319,18 +323,34 @@ function formatDuration(ms) {
 async function setupBatteryReporting(conn){
   dataConn = conn;
   if (batteryReportInterval) clearInterval(batteryReportInterval);
-  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
+  
+  // 1. Envoi immédiat du temps de fonctionnement (uptime) sans attendre l'API Batterie
+  sendBatteryStatus();
 
-  if (!batteryManager) {
-    try{
+  // 2. Essai de récupération de l'API batterie
+  if ('getBattery' in navigator) {
+    try {
       batteryManager = await navigator.getBattery();
+      
+      // Nettoyage des anciens écouteurs
+      if (batteryLevelListener) batteryManager.removeEventListener('levelchange', batteryLevelListener);
+      if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
+
       batteryLevelListener = () => sendBatteryStatus();
       batteryChargingListener = () => sendBatteryStatus();
+
       batteryManager.addEventListener('levelchange', batteryLevelListener);
       batteryManager.addEventListener('chargingchange', batteryChargingListener);
-    }catch(e){}
+      
+      // Mise à jour avec les vraies valeurs de batterie
+      sendBatteryStatus();
+    } catch(e) {
+      console.warn("API Batterie accessible mais refusée :", e);
+    }
   }
-  sendBatteryStatus();
+
+  // 3. Boucle de rappel toutes les 30 secondes
+  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
 }
 
 function sendBatteryStatus(){
@@ -343,22 +363,17 @@ function sendBatteryStatus(){
   }
 }
 
+function sendHistoryToScreen(){
+  if (dataConn && dataConn.open) {
+    dataConn.send({ type: 'history_sync', history: cameraAlertHistory });
+  }
+}
+
 function randomCode(){
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let c = '';
   for (let i=0;i<5;i++) c += chars[Math.floor(Math.random()*chars.length)];
   return c;
-}
-
-// Local storage pour l'historique
-function historyLoad(code){
-  try{ return JSON.parse(localStorage.getItem('bp-alerts-' + code) || '[]'); }catch(e){ return []; }
-}
-function historySave(code, list){
-  try{ localStorage.setItem('bp-alerts-' + code, JSON.stringify(list)); }catch(e){}
-}
-function historyClearStorage(code){
-  try{ localStorage.removeItem('bp-alerts-' + code); }catch(e){}
 }
 
 // ---------- HOME ----------
@@ -432,8 +447,8 @@ async function startCamera(facingMode){
   cameraStartTime = Date.now();
   let currentFacingMode = facingMode || 'environment';
 
-  // Réinitialiser tout ancien historique stocké avec ce code
-  historyClearStorage(code);
+  // L'historique RAM démarrant à zéro à chaque lancement
+  cameraAlertHistory = [];
 
   app.innerHTML = `
     <button class="back" id="back">← Arrêter la caméra</button>
@@ -466,12 +481,10 @@ async function startCamera(facingMode){
     <div class="hint">💡 Pour une autonomie maximale, laissez ce téléphone branché au chargeur.</div>
   `;
   document.getElementById('back').onclick = () => { 
-    historyClearStorage(code);
     stopEverything(); 
     renderHome(); 
   };
 
-  // Timer durée d'activation local
   timerInterval = setInterval(() => {
     const el = document.getElementById('camUptime');
     if (el && cameraStartTime) el.textContent = formatDuration(Date.now() - cameraStartTime);
@@ -555,9 +568,23 @@ async function startCamera(facingMode){
   });
 
   peer.on('connection', conn => {
-    conn.on('open', () => setupBatteryReporting(conn));
-  });
+    dataConn = conn;
 
+    // Lancement de la batterie dès la connexion
+    if (conn.open) {
+      setupBatteryReporting(conn);
+    } else {
+      conn.on('open', () => setupBatteryReporting(conn));
+    }
+
+    // Traitement des alertes
+    conn.on('data', data => {
+      if (data && data.type === 'new_alert') {
+        recordAlertOnCamera(data.timestamp);
+      }
+    });
+  });
+  
   peer.on('error', err => {
     if (err.type === 'unavailable-id') {
       setStatus('Ce code est déjà utilisé, rechargez la page pour en générer un autre.', 'error');
@@ -574,14 +601,21 @@ async function startCamera(facingMode){
   });
 }
 
+// Consignation en mémoire RAM sur le téléphone Caméra
+function recordAlertOnCamera(isoTimestamp){
+  cameraAlertHistory.push(isoTimestamp);
+  if (cameraAlertHistory.length > MAX_ALERTES) {
+    cameraAlertHistory.shift(); // Conservation stricte des 50 dernières alertes
+  }
+  sendHistoryToScreen();
+}
+
 // ---------- SCREEN ROLE ----------
 
 async function startScreen(code){
   currentRoomCode = code;
   blackModeOn = false;
-  
-  // Charger l'historique préservé s'il existe
-  alertHistory = historyLoad(code);
+  screenAlertHistory = [];
 
   app.innerHTML = `
     <button class="back" id="back">← Quitter</button>
@@ -628,9 +662,8 @@ async function startScreen(code){
       </div>
     </div>
     <div class="history-wrap">
-      <label>Historique des alertes</label>
+      <label>Historique des alertes (stocké sur la caméra)</label>
       <div id="historyList" class="history-list"></div>
-      <button class="history-clear" id="clearHistory">Effacer l'historique</button>
     </div>
     <div class="hint">Gardez cet onglet ouvert pour continuer à recevoir l'image et les alertes.</div>
   `;
@@ -641,11 +674,6 @@ async function startScreen(code){
   const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
 
   renderHistory();
-  document.getElementById('clearHistory').onclick = () => {
-    alertHistory = [];
-    historySave(code, alertHistory);
-    renderHistory();
-  };
 
   const blackToggle = document.getElementById('blackToggle');
   const blackOverlay = document.getElementById('blackOverlay');
@@ -696,7 +724,6 @@ function connectToCamera(code, setStatus){
 
   peer.on('open', () => {
     try{
-      // Canal de données pour l'état de la batterie et de la durée
       dataConn = peer.connect(PEER_PREFIX + code);
       dataConn.on('data', data => handleIncomingData(data));
 
@@ -764,6 +791,10 @@ function handleIncomingData(data){
         if (data.charging) lowBatteryAlerted = false;
       }
     }
+  } else if (data.type === 'history_sync') {
+    // Réception de l'historique complet provenant directement de la RAM de la caméra
+    screenAlertHistory = data.history || [];
+    renderHistory();
   }
 }
 
@@ -805,7 +836,7 @@ function setupMeter(stream){
       if (now - lastAlert > 1800) {
         lastAlert = now;
         triggerAlert();
-        logAlert();
+        logAlertToServer();
       }
     }
     meterRaf = requestAnimationFrame(loop);
@@ -830,22 +861,26 @@ function triggerAlert(){
   }catch(e){}
 }
 
-function logAlert(){
-  if (!currentRoomCode) return;
-  alertHistory.push(new Date().toISOString());
-  if (alertHistory.length > 30) alertHistory = alertHistory.slice(-30);
-  historySave(currentRoomCode, alertHistory);
-  renderHistory();
+function logAlertToServer(){
+  const isoTime = new Date().toISOString();
+  console.log("Tentative d'envoi d'alerte à la caméra...", dataConn);
+  
+  if (dataConn && dataConn.open) {
+    dataConn.send({ type: 'new_alert', timestamp: isoTime });
+    console.log("Alerte envoyée avec succès !");
+  } else {
+    console.warn("Échec : le canal dataConn n'est pas ouvert.", dataConn ? dataConn.open : "dataConn nul");
+  }
 }
 
 function renderHistory(){
   const list = document.getElementById('historyList');
   if (!list) return;
-  if (alertHistory.length === 0){
-    list.innerHTML = '<div class="history-empty">Aucune alerte pour le moment.</div>';
+  if (screenAlertHistory.length === 0){
+    list.innerHTML = '<div class="history-empty">Aucune alerte enregistrée pour cette session.</div>';
     return;
   }
-  list.innerHTML = alertHistory.slice().reverse().map(ts => {
+  list.innerHTML = screenAlertHistory.slice().reverse().map(ts => {
     const d = new Date(ts);
     const time = d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     const dateLabel = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
