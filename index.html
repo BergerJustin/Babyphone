@@ -323,34 +323,21 @@ function formatDuration(ms) {
 async function setupBatteryReporting(conn){
   dataConn = conn;
   if (batteryReportInterval) clearInterval(batteryReportInterval);
-  
-  // 1. Envoi immédiat du temps de fonctionnement (uptime) sans attendre l'API Batterie
-  sendBatteryStatus();
+  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
 
-  // 2. Essai de récupération de l'API batterie
-  if ('getBattery' in navigator) {
-    try {
+  if (!batteryManager) {
+    try{
       batteryManager = await navigator.getBattery();
-      
-      // Nettoyage des anciens écouteurs
-      if (batteryLevelListener) batteryManager.removeEventListener('levelchange', batteryLevelListener);
-      if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
-
       batteryLevelListener = () => sendBatteryStatus();
       batteryChargingListener = () => sendBatteryStatus();
-
       batteryManager.addEventListener('levelchange', batteryLevelListener);
       batteryManager.addEventListener('chargingchange', batteryChargingListener);
-      
-      // Mise à jour avec les vraies valeurs de batterie
-      sendBatteryStatus();
-    } catch(e) {
-      console.warn("API Batterie accessible mais refusée :", e);
-    }
+    }catch(e){}
   }
-
-  // 3. Boucle de rappel toutes les 30 secondes
-  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
+  sendBatteryStatus();
+  
+  // Dès le premier handshake, la caméra expédie son historique RAM au nouvel écran
+  sendHistoryToScreen();
 }
 
 function sendBatteryStatus(){
@@ -568,23 +555,21 @@ async function startCamera(facingMode){
   });
 
   peer.on('connection', conn => {
-    dataConn = conn;
-
-    // Lancement de la batterie dès la connexion
-    if (conn.open) {
+    dataConn = conn; // On stocke la référence active
+    
+    conn.on('open', () => {
       setupBatteryReporting(conn);
-    } else {
-      conn.on('open', () => setupBatteryReporting(conn));
-    }
-
-    // Traitement des alertes
+    });
+    
+    // On place l'écouteur directement sur 'conn' plutôt que d'attendre
     conn.on('data', data => {
+      console.log("Donnée reçue par la caméra :", data);
       if (data && data.type === 'new_alert') {
         recordAlertOnCamera(data.timestamp);
       }
     });
   });
-  
+
   peer.on('error', err => {
     if (err.type === 'unavailable-id') {
       setStatus('Ce code est déjà utilisé, rechargez la page pour en générer un autre.', 'error');
