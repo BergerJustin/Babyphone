@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Veilleuse — Babyphone</title>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" onerror="var s=document.createElement('script'); s.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'; document.head.appendChild(s);"></script>
+<style>
+  :root{
+    --bg: #0e0d12;
+    --bg-soft: #17151d;
+    --amber: #e8a24d;
+    --amber-dim: #7a5a2e;
+    --moon: #cfd6e8;
+    --moon-dim: #6b7284;
+    --ok: #7ec99b;
+    --alert: #e8664d;
+    --line: #29262f;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(circle at 50% 0%, #1c1a24 0%, var(--bg) 55%);
+    color: var(--moon);
+    font-family: 'Georgia', 'Iowan Old Style', serif;
+    min-height:100dvh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 28px 18px 40px;
+  }
+  .stars{
+    position:fixed; inset:0; pointer-events:none; opacity:.5;
+    background-image:
+      radial-gradient(1px 1px at 20% 30%, #fff, transparent),
+      radial-gradient(1px 1px at 70% 60%, #fff, transparent),
+      radial-gradient(1px 1px at 40% 80%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 85% 20%, #fff, transparent),
+      radial-gradient(1px 1px at 55% 10%, #fff, transparent),
+      radial-gradient(1.5px 1.5px at 10% 65%, #fff, transparent);
+    background-repeat:no-repeat;
+  }
+  .eyebrow{
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    text-transform:uppercase;
+    letter-spacing:.28em;
+    font-size:11px;
+    color: var(--amber);
+    opacity:.85;
+    margin-bottom:6px;
+  }
+  h1{
+    font-weight:400;
+    font-size:1.7rem;
+    margin: 0 0 4px;
+    color:#f3efe6;
+    letter-spacing:.01em;
+  }
+  .sub{
+    font-family:'Helvetica Neue', Arial, sans-serif;
+    color: var(--moon-dim);
+    font-size:.9rem;
+    max-width:340px;
+    text-align:center;
+    line-height:1.5;
+    margin-bottom:28px;
+  }
+  .card{
+    width:100%; max-width:380px;
+    background: linear-gradient(180deg, var(--bg-soft), #131117);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:22px;
+    box-shadow: 0 20px 60px -20px rgba(0,0,0,.6);
+    z-index:1;
+  }
+  .choice-row{ display:flex; flex-direction:column; gap:12px; width:100%; max-width:380px; z-index:1;}
+  .choice-btn{
+    display:flex; align-items:center; gap:14px;
+    background: var(--bg-soft);
+    border:1px solid var(--line);
+    color:#f3efe6;
+    border-radius:16px;
+    padding:18px 20px;
+    font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:1rem;
+    text-align:left;
+    cursor:pointer;
+    transition:.15s border-color, .15s transform;
+  }
+  .choice-btn:active{ transform: scale(.98); }
+  .choice-btn:hover{ border-color: var(--amber-dim); }
+  .choice-btn .glyph{
+    font-size:1.6rem; width:44px; height:44px; flex:none;
+    display:flex; align-items:center; justify-content:center;
+    border-radius:12px; background:rgba(232,162,77,.08);
+  }
+  .choice-btn small{ display:block; color:var(--moon-dim); font-weight:400; margin-top:2px; font-size:.8rem;}
+  label{
+    font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:.78rem; text-transform:uppercase; letter-spacing:.14em;
+    color: var(--moon-dim); display:block; margin-bottom:8px;
+  }
+  input[type=text]{
+    width:100%; background:#0c0b10; border:1px solid var(--line); color:#f3efe6;
+    padding:14px 16px; border-radius:12px; font-size:1.4rem; letter-spacing:.15em;
+    font-family:'Helvetica Neue', Arial, sans-serif; text-transform:uppercase; text-align:center;
+    margin-bottom:16px;
+  }
+  input[type=text]:focus{ outline:none; border-color:var(--amber-dim); }
+  .btn{
+    width:100%; padding:14px; border-radius:12px; border:none; cursor:pointer;
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.95rem; font-weight:600;
+    letter-spacing:.02em;
+  }
+  .btn-primary{ background: linear-gradient(180deg, #f0b268, var(--amber)); color:#1a1206; }
+  .btn-primary:active{ transform: scale(.98); }
+  .btn-ghost{ background:transparent; border:1px solid var(--line); color:var(--moon-dim); margin-top:10px; }
+  .code-display{
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:2.3rem; letter-spacing:.22em;
+    text-align:center; color:#f3efe6; background:#0c0b10; border:1px dashed var(--amber-dim);
+    border-radius:14px; padding:18px 10px; margin: 10px 0 18px;
+  }
+  .status-row{ display:flex; align-items:center; gap:8px; font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; color:var(--moon-dim); margin-bottom:14px;}
+  .dot{ width:8px; height:8px; border-radius:50%; background:var(--moon-dim); flex:none; }
+  .dot.connecting{ background: var(--amber); animation: pulse 1.4s infinite; }
+  .dot.live{ background: var(--ok); }
+  .dot.error{ background: var(--alert); }
+  @keyframes pulse{ 0%,100%{opacity:1;} 50%{opacity:.35;} }
+  video{
+    width:100%; border-radius:14px; background:#000; display:block;
+    aspect-ratio: 4/3; object-fit:cover; margin-bottom:0;
+  }
+  .meter-wrap{ margin-bottom:16px; }
+  .meter{
+    width:100%; height:14px; background:#0c0b10; border:1px solid var(--line);
+    border-radius:8px; overflow:hidden; position:relative;
+  }
+  .meter-fill{
+    height:100%; width:0%; background: linear-gradient(90deg, var(--ok), var(--amber), var(--alert));
+    transition: width .08s linear;
+  }
+  .threshold-row{ display:flex; align-items:center; gap:10px; margin-top:10px; font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim);}
+  input[type=range]{ flex:1; accent-color: var(--amber); }
+  .toggle-row{
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; color:var(--moon);
+    padding:10px 0; border-top:1px solid var(--line); margin-top:6px;
+  }
+  .switch{ position:relative; width:42px; height:24px; }
+  .switch input{ opacity:0; width:0; height:0; }
+  .slider{ position:absolute; inset:0; background:#2a2732; border-radius:20px; cursor:pointer; transition:.2s; }
+  .slider:before{ content:""; position:absolute; width:18px; height:18px; left:3px; top:3px; background:#f3efe6; border-radius:50%; transition:.2s; }
+  input:checked + .slider{ background: var(--amber-dim); }
+  input:checked + .slider:before{ transform: translateX(18px); background: var(--amber); }
+  .alert-flash{
+    position:fixed; inset:0; background: radial-gradient(circle, rgba(232,102,77,.35), transparent 70%);
+    pointer-events:none; opacity:0; transition:opacity .15s;
+  }
+  .alert-flash.on{ opacity:1; }
+  .hint{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.78rem; color:var(--moon-dim); text-align:center; margin-top:16px; line-height:1.5; }
+  .back{
+    position:fixed; top:18px; left:18px; z-index:2; background:none; border:none; color:var(--moon-dim);
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.85rem; cursor:pointer;
+  }
+  .video-wrap{ position:relative; margin-bottom:14px; }
+  .black-overlay{
+    position:absolute; inset:0; background:#000; border-radius:14px;
+    display:none; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    cursor:pointer; border:1px solid var(--line);
+  }
+  .black-overlay .moon{ font-size:2rem; opacity:.7; }
+  .black-overlay .black-text{
+    font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim); text-align:center; line-height:1.5;
+  }
+  .black-overlay .black-text span{ font-size:.72rem; opacity:.7; }
+  .history-wrap{ margin-top:16px; }
+  .history-list{
+    max-height:150px; overflow-y:auto; background:#0c0b10; border:1px solid var(--line);
+    border-radius:12px; padding:4px 14px;
+  }
+  .history-item{
+    display:flex; align-items:center; gap:8px; padding:9px 0; font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:.85rem; color:var(--moon); border-bottom:1px solid var(--line);
+  }
+  .history-item:last-child{ border-bottom:none; }
+  .history-dot{ width:6px; height:6px; border-radius:50%; background:var(--alert); flex:none; }
+  .history-empty{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.8rem; color:var(--moon-dim); padding:14px 0; text-align:center; }
+  .history-clear{
+    background:none; border:none; color:var(--moon-dim); font-family:'Helvetica Neue', Arial, sans-serif;
+    font-size:.75rem; text-decoration:underline; cursor:pointer; margin-top:8px; padding:0;
+  }
+  .retry-btn{ margin-top:14px; }
+</style>
+</head>
+<body>
+<div class="stars"></div>
+<div class="alert-flash" id="alertFlash"></div>
+
+<div id="app"></div>
+
+<script>
+window.addEventListener('error', (e) => {
+  const statusText = document.getElementById('statusText');
+  const dot = document.getElementById('dot');
+  if (statusText) statusText.textContent = 'Erreur technique : ' + (e.message || 'inconnue');
+  if (dot) dot.className = 'dot error';
+});
+
+const PEER_PREFIX = 'babyphone5-';
+const app = document.getElementById('app');
+const alertFlash = document.getElementById('alertFlash');
+
+let peer = null, call = null, dataConn = null;
+let localStream = null, remoteStream = null;
+let audioCtx = null, analyser = null, meterRaf = null;
+let alertHistory = [];
+let currentRoomCode = null;
+let blackModeOn = false;
+let batteryManager = null, batteryReportInterval = null;
+let batteryLevelListener = null, batteryChargingListener = null;
+let lowBatteryAlerted = false;
+
+function stopEverything(){
+  if (meterRaf) cancelAnimationFrame(meterRaf);
+  if (call) { try{ call.close(); }catch(e){} call = null; }
+  if (dataConn) { try{ dataConn.close(); }catch(e){} dataConn = null; }
+  if (peer) { try{ peer.destroy(); }catch(e){} peer = null; }
+  if (localStream) { localStream.getTracks().forEach(t=>t.stop()); localStream = null; }
+  if (audioCtx) { try{ audioCtx.close(); }catch(e){} audioCtx = null; }
+  if (batteryReportInterval) { clearInterval(batteryReportInterval); batteryReportInterval = null; }
+  if (batteryManager) {
+    if (batteryLevelListener) batteryManager.removeEventListener('levelchange', batteryLevelListener);
+    if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
+    batteryManager = null;
+  }
+  lowBatteryAlerted = false;
+  if (wakeLock) { try{ wakeLock.release(); }catch(e){} wakeLock = null; }
+  document.removeEventListener('visibilitychange', reacquireWakeLockIfNeeded);
+  if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
+  if (activityHandler) {
+    ACTIVITY_EVENTS.forEach(evt => document.removeEventListener(evt, activityHandler));
+    activityHandler = null;
+  }
+}
+window.addEventListener('beforeunload', stopEverything);
+
+let wakeLock = null;
+let inactivityTimer = null;
+let activityHandler = null;
+const ACTIVITY_EVENTS = ['touchstart', 'mousedown', 'keydown', 'scroll'];
+
+async function requestWakeLock(){
+  try{
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+    }
+  }catch(e){ /* pas grave, la surveillance continue mais l'écran pourrait se verrouiller */ }
+}
+
+function reacquireWakeLockIfNeeded(){
+  if (document.visibilityState === 'visible' && (!wakeLock || wakeLock.released)) {
+    requestWakeLock();
+  }
+}
+
+function resetInactivityTimer(ecoToggle, overlay){
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(() => {
+    if (ecoToggle && !ecoToggle.checked) {
+      ecoToggle.checked = true;
+      setEcoMode(true, overlay);
+    }
+  }, 60000);
+}
+
+async function setEcoMode(on, overlay){
+  overlay.style.display = on ? 'flex' : 'none';
+  if (!localStream) return;
+  const videoTrack = localStream.getVideoTracks()[0];
+  if (!videoTrack) return;
+  try{
+    if (on) {
+      await videoTrack.applyConstraints({ width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 8, max: 8 } });
+    } else {
+      await videoTrack.applyConstraints({ width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 15 } });
+    }
+  }catch(e){ /* certains téléphones refusent le changement à chaud, l'image reste dans sa résolution actuelle */ }
+}
+
+async function setupBatteryReporting(conn){
+  dataConn = conn;
+  if (batteryReportInterval) clearInterval(batteryReportInterval);
+  batteryReportInterval = setInterval(sendBatteryStatus, 60000);
+
+  if (!batteryManager) {
+    try{
+      batteryManager = await navigator.getBattery();
+      batteryLevelListener = () => sendBatteryStatus();
+      batteryChargingListener = () => sendBatteryStatus();
+      batteryManager.addEventListener('levelchange', batteryLevelListener);
+      batteryManager.addEventListener('chargingchange', batteryChargingListener);
+    }catch(e){ /* API batterie non disponible sur ce téléphone/navigateur */ }
+  }
+  sendBatteryStatus();
+}
+
+function sendBatteryStatus(){
+  if (!dataConn || !dataConn.open) return;
+  if (batteryManager) {
+    dataConn.send({ type: 'battery', supported: true, level: batteryManager.level, charging: batteryManager.charging });
+  } else {
+    dataConn.send({ type: 'battery', supported: false });
+  }
+}
+
+function randomCode(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = '';
+  for (let i=0;i<5;i++) c += chars[Math.floor(Math.random()*chars.length)];
+  return c;
+}
+
+// Local browser storage for this device's own alert history (works on any real host)
+function historyLoad(code){
+  try{ return JSON.parse(localStorage.getItem('bp-alerts-' + code) || '[]'); }catch(e){ return []; }
+}
+function historySave(code, list){
+  try{ localStorage.setItem('bp-alerts-' + code, JSON.stringify(list)); }catch(e){}
+}
+
+// ---------- HOME ----------
+
+function renderHome(){
+  stopEverything();
+  app.innerHTML = `
+    <div class="eyebrow">Veilleuse</div>
+    <h1>Babyphone maison</h1>
+    <div class="sub">Deux téléphones, une connexion directe. La vidéo passe d'un appareil à l'autre — seule la mise en relation initiale passe par un service de signalisation public.</div>
+    <div class="choice-row">
+      <button class="choice-btn" id="btnCam">
+        <div class="glyph">📹</div>
+        <div><div>Caméra</div><small>À poser dans la chambre</small></div>
+      </button>
+      <button class="choice-btn" id="btnScreen">
+        <div class="glyph">🌙</div>
+        <div><div>Écran</div><small>Pour surveiller à distance</small></div>
+      </button>
+    </div>
+    <div class="hint">Astuce : les deux téléphones doivent avoir une connexion internet active (Wi-Fi ou 4G/5G).</div>
+  `;
+  document.getElementById('btnCam').onclick = renderCameraSetup;
+  document.getElementById('btnScreen').onclick = renderScreenSetup;
+}
+
+function renderCameraSetup(){
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Caméra</div>
+    <h1>Chambre de bébé</h1>
+    <div class="sub">Autorisez la caméra et le micro, puis posez le téléphone face au lit.</div>
+    <div class="card">
+      <label>Quelle caméra utiliser ?</label>
+      <button class="btn btn-primary" id="startCamBack" style="margin-bottom:10px;">📷 Caméra arrière</button>
+      <button class="btn btn-ghost" id="startCamFront">🤳 Caméra frontale (selfie)</button>
+    </div>
+  `;
+  document.getElementById('back').onclick = renderHome;
+  document.getElementById('startCamBack').onclick = () => startCamera('environment');
+  document.getElementById('startCamFront').onclick = () => startCamera('user');
+}
+
+function renderScreenSetup(){
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Écran</div>
+    <h1>Surveillance</h1>
+    <div class="sub">Entrez le code affiché sur le téléphone-caméra.</div>
+    <div class="card">
+      <label>Code de connexion</label>
+      <input type="text" id="codeInput" maxlength="5" placeholder="ABCDE">
+      <button class="btn btn-primary" id="connectBtn">Se connecter</button>
+    </div>
+  `;
+  document.getElementById('back').onclick = renderHome;
+  document.getElementById('codeInput').addEventListener('input', e=>{
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
+  });
+  document.getElementById('connectBtn').onclick = () => {
+    const code = document.getElementById('codeInput').value.trim();
+    if (code.length < 4) { alert('Entrez le code à 5 caractères affiché sur la caméra.'); return; }
+    startScreen(code);
+  };
+}
+
+// ---------- CAMERA ROLE ----------
+
+async function startCamera(facingMode){
+  const code = randomCode();
+  let currentFacingMode = facingMode || 'environment';
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Caméra active</div>
+    <h1>Code : partagez-le</h1>
+    <div class="code-display">${code}</div>
+    <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">Initialisation de la caméra…</span></div>
+    <div class="video-wrap" id="localVideoWrap">
+      <video id="localVideo" autoplay playsinline muted></video>
+      <div class="black-overlay" id="camBlackOverlay">
+        <div class="moon">🔋</div>
+        <div class="black-text">Mode économie actif<br><span>La caméra continue d'envoyer l'image — touchez pour revoir l'aperçu</span></div>
+      </div>
+    </div>
+    <button class="btn btn-ghost" id="switchCamBtn" style="margin-bottom:14px;">🔄 Changer de caméra (avant/arrière)</button>
+    <div class="toggle-row">
+      <span>Mode économie d'énergie</span>
+      <label class="switch"><input type="checkbox" id="ecoToggle"><span class="slider"></span></label>
+    </div>
+    <div class="hint">Entrez ce code sur le téléphone-écran. Laissez cette page ouverte tant que la surveillance est active — l'écran doit rester allumé pour que la caméra continue de fonctionner.</div>
+    <div class="hint">🕐 L'aperçu s'assombrit automatiquement après 1 minute sans y toucher (le flux vers l'écran-parent continue). Touchez l'écran pour le rallumer.</div>
+    <div class="hint">💡 Pour une autonomie maximale, laissez ce téléphone branché au chargeur.</div>
+  `;
+  document.getElementById('back').onclick = () => { stopEverything(); renderHome(); };
+
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
+  const localVideoEl = document.getElementById('localVideo');
+
+  function videoConstraints(fm, eco){
+    return eco
+      ? { facingMode: fm, width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 8, max: 8 } }
+      : { facingMode: fm, width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 15 } };
+  }
+
+  try{
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraints(currentFacingMode, false),
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+  }catch(e){
+    setStatus("Impossible d'accéder à la caméra/micro. Vérifiez les autorisations du site.", 'error');
+    return;
+  }
+  localVideoEl.srcObject = localStream;
+  localVideoEl.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+  setStatus('Caméra prête. Connexion au service de mise en relation…', 'connecting');
+
+  requestWakeLock();
+  document.addEventListener('visibilitychange', reacquireWakeLockIfNeeded);
+
+  document.getElementById('switchCamBtn').onclick = async () => {
+    currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+    const eco = document.getElementById('ecoToggle').checked;
+    const oldVideoTrack = localStream.getVideoTracks()[0];
+    if (oldVideoTrack) {
+      oldVideoTrack.stop();
+      localStream.removeTrack(oldVideoTrack);
+    }
+    await new Promise(r => setTimeout(r, 200));
+    try{
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints(currentFacingMode, eco),
+        audio: false
+      });
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      localStream.addTrack(newVideoTrack);
+      localVideoEl.srcObject = null;
+      localVideoEl.srcObject = localStream;
+      localVideoEl.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'none';
+      if (call && call.peerConnection) {
+        const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+        if (sender) await sender.replaceTrack(newVideoTrack);
+      }
+    }catch(e){
+      setStatus('Impossible de changer de caméra : ' + e.message, 'error');
+    }
+  };
+
+  const ecoToggle = document.getElementById('ecoToggle');
+  const camBlackOverlay = document.getElementById('camBlackOverlay');
+  ecoToggle.onchange = () => setEcoMode(ecoToggle.checked, camBlackOverlay);
+  camBlackOverlay.onclick = () => { ecoToggle.checked = false; setEcoMode(false, camBlackOverlay); };
+
+  activityHandler = () => resetInactivityTimer(ecoToggle, camBlackOverlay);
+  ACTIVITY_EVENTS.forEach(evt => document.addEventListener(evt, activityHandler));
+  resetInactivityTimer(ecoToggle, camBlackOverlay);
+
+  peer = new Peer(PEER_PREFIX + code);
+
+  peer.on('open', () => {
+    setStatus("Caméra prête. En attente de connexion de l'écran…", 'connecting');
+  });
+
+  peer.on('call', incomingCall => {
+    call = incomingCall;
+    call.answer(localStream);
+    setStatus('Connecté ✅ — l\'écran reçoit l\'image.', 'live');
+    call.on('close', () => setStatus('Écran déconnecté.', 'connecting'));
+  });
+
+  peer.on('connection', conn => {
+    conn.on('open', () => setupBatteryReporting(conn));
+  });
+
+  peer.on('error', err => {
+    if (err.type === 'unavailable-id') {
+      setStatus('Ce code est déjà utilisé, rechargez la page pour en générer un autre.', 'error');
+    } else if (err.type === 'network' || err.type === 'server-error' || err.type === 'disconnected') {
+      setStatus('Problème de connexion au service. Nouvelle tentative…', 'error');
+    } else {
+      setStatus('Erreur : ' + err.type, 'error');
+    }
+  });
+
+  peer.on('disconnected', () => {
+    setStatus('Connexion au service perdue, reconnexion…', 'connecting');
+    try{ peer.reconnect(); }catch(e){}
+  });
+}
+
+// ---------- SCREEN ROLE ----------
+
+async function startScreen(code){
+  currentRoomCode = code;
+  blackModeOn = false;
+  alertHistory = historyLoad(code);
+
+  app.innerHTML = `
+    <button class="back" id="back">← Retour</button>
+    <div class="eyebrow">Écran — code ${code}</div>
+    <h1>Surveillance en direct</h1>
+    <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">Recherche de la caméra…</span></div>
+    <div class="video-wrap" id="videoWrap">
+      <video id="remoteVideo" autoplay playsinline></video>
+      <div class="black-overlay" id="blackOverlay">
+        <div class="moon">🌙</div>
+        <div class="black-text">Écran noir actif<br><span>Le son reste surveillé — touchez pour rallumer</span></div>
+      </div>
+    </div>
+    <div id="retryWrap"></div>
+    <div class="meter-wrap">
+      <label>Niveau sonore</label>
+      <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+      <div class="threshold-row">
+        <span>Seuil d'alerte</span>
+        <input type="range" id="threshold" min="10" max="90" value="55">
+      </div>
+      <div class="toggle-row">
+        <span>Alerte vibration + son</span>
+        <label class="switch"><input type="checkbox" id="alertToggle" checked><span class="slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <span>Écran noir (économie batterie)</span>
+        <label class="switch"><input type="checkbox" id="blackToggle"><span class="slider"></span></label>
+      </div>
+    </div>
+    <div class="history-wrap">
+      <label>Historique des alertes</label>
+      <div id="historyList" class="history-list"></div>
+      <button class="history-clear" id="clearHistory">Effacer l'historique</button>
+    </div>
+    <div class="hint">Gardez cet onglet ouvert pour continuer à recevoir l'image et les alertes.</div>
+  `;
+  document.getElementById('back').onclick = () => { stopEverything(); renderHome(); };
+
+  const dot = document.getElementById('dot');
+  const statusText = document.getElementById('statusText');
+  const setStatus = (txt, cls) => { statusText.textContent = txt; dot.className = 'dot ' + cls; };
+
+  renderHistory();
+  document.getElementById('clearHistory').onclick = () => {
+    alertHistory = [];
+    historySave(code, alertHistory);
+    renderHistory();
+  };
+
+  const blackToggle = document.getElementById('blackToggle');
+  const blackOverlay = document.getElementById('blackOverlay');
+  blackToggle.onchange = () => setBlackMode(blackToggle.checked);
+  blackOverlay.onclick = () => { blackToggle.checked = false; setBlackMode(false); };
+
+  connectToCamera(code, setStatus);
+}
+
+function createDummyStream(){
+  const canvas = document.createElement('canvas');
+  canvas.width = 2; canvas.height = 2;
+  const ctx = canvas.getContext('2d');
+  ctx.fillRect(0, 0, 2, 2);
+  const videoTrack = canvas.captureStream(1).getVideoTracks()[0];
+
+  const dummyAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try{ dummyAudioCtx.resume(); }catch(e){}
+  const dest = dummyAudioCtx.createMediaStreamDestination();
+  const audioTrack = dest.stream.getAudioTracks()[0];
+
+  return new MediaStream([videoTrack, audioTrack]);
+}
+
+function connectToCamera(code, setStatus){
+  const retryWrap = document.getElementById('retryWrap');
+  retryWrap.innerHTML = '';
+
+  if (typeof Peer === 'undefined') {
+    showRetry(code, setStatus, "La bibliothèque de connexion n'a pas pu se charger. Vérifiez votre connexion internet.");
+    return;
+  }
+
+  let dummyStream;
+  try{
+    dummyStream = createDummyStream();
+  }catch(e){
+    setStatus('Préparation du flux impossible (' + e.message + '), tentative simplifiée…', 'connecting');
+    dummyStream = new MediaStream();
+  }
+
+  try{
+    peer = new Peer();
+  }catch(e){
+    showRetry(code, setStatus, 'Impossible de créer la connexion : ' + e.message);
+    return;
+  }
+
+  peer.on('open', () => {
+    try{
+      call = peer.call(PEER_PREFIX + code, dummyStream);
+
+      call.on('stream', stream => {
+        remoteStream = stream;
+        document.getElementById('remoteVideo').srcObject = remoteStream;
+        setStatus('Connecté ✅ — image en direct.', 'live');
+        if (blackModeOn) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
+        if (remoteStream.getAudioTracks().length) setupMeter(remoteStream);
+      });
+
+      call.on('close', () => setStatus('Connexion perdue.', 'error'));
+      call.on('error', () => showRetry(code, setStatus, "Erreur de connexion à la caméra."));
+    }catch(e){
+      showRetry(code, setStatus, "Impossible d'appeler la caméra : " + e.message);
+    }
+  });
+
+  peer.on('error', err => {
+    if (err.type === 'peer-unavailable') {
+      showRetry(code, setStatus, "Caméra introuvable. Vérifiez le code, ou que la caméra est bien démarrée.");
+    } else if (err.type === 'network' || err.type === 'server-error') {
+      showRetry(code, setStatus, 'Problème de connexion au service.');
+    } else {
+      showRetry(code, setStatus, 'Erreur : ' + err.type);
+    }
+  });
+}
+
+function showRetry(code, setStatus, message){
+  setStatus(message, 'error');
+  const retryWrap = document.getElementById('retryWrap');
+  if (!retryWrap) return;
+  retryWrap.innerHTML = `<button class="btn btn-primary retry-btn" id="retryBtn">Réessayer</button>`;
+  document.getElementById('retryBtn').onclick = () => {
+    if (peer) { try{ peer.destroy(); }catch(e){} peer = null; }
+    setStatus('Recherche de la caméra…', 'connecting');
+    connectToCamera(code, setStatus);
+  };
+}
+
+function setupMeter(stream){
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  const meterFill = document.getElementById('meterFill');
+  let lastAlert = 0;
+
+  function loop(){
+    analyser.getByteFrequencyData(data);
+    const avg = data.reduce((a,b)=>a+b,0) / data.length;
+    const pct = Math.min(100, Math.round((avg / 90) * 100));
+    if (meterFill) meterFill.style.width = pct + '%';
+
+    const thresholdEl = document.getElementById('threshold');
+    const toggleEl = document.getElementById('alertToggle');
+    const threshold = thresholdEl ? Number(thresholdEl.value) : 55;
+
+    if (pct > threshold && toggleEl && toggleEl.checked) {
+      const now = Date.now();
+      if (now - lastAlert > 1800) {
+        lastAlert = now;
+        triggerAlert();
+      }
+    }
+    meterRaf = requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+function triggerAlert(){
+  alertFlash.classList.add('on');
+  setTimeout(()=>alertFlash.classList.remove('on'), 400);
+  if (navigator.vibrate) navigator.vibrate([120,60,120]);
+  try{
+    const beepCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = beepCtx.createOscillator();
+    const gain = beepCtx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, beepCtx.currentTime);
+    osc.connect(gain); gain.connect(beepCtx.destination);
+    osc.start();
+    osc.stop(beepCtx.currentTime + 0.25);
+    osc.onended = () => beepCtx.close();
+  }catch(e){}
+  logAlert();
+}
+
+function logAlert(){
+  if (!currentRoomCode) return;
+  alertHistory.push(new Date().toISOString());
+  if (alertHistory.length > 20) alertHistory = alertHistory.slice(-20);
+  historySave(currentRoomCode, alertHistory);
+  renderHistory();
+}
+
+function renderHistory(){
+  const list = document.getElementById('historyList');
+  if (!list) return;
+  if (alertHistory.length === 0){
+    list.innerHTML = '<div class="history-empty">Aucune alerte pour le moment.</div>';
+    return;
+  }
+  list.innerHTML = alertHistory.slice().reverse().map(ts => {
+    const d = new Date(ts);
+    const time = d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const dateLabel = d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+    return `<div class="history-item"><span class="history-dot"></span>${time} <span style="color:var(--moon-dim); margin-left:auto;">${dateLabel}</span></div>`;
+  }).join('');
+}
+
+function setBlackMode(on){
+  blackModeOn = on;
+  const remoteVideoEl = document.getElementById('remoteVideo');
+  const blackOverlay = document.getElementById('blackOverlay');
+  if (!remoteVideoEl || !blackOverlay) return;
+  if (on){
+    blackOverlay.style.display = 'flex';
+    if (remoteStream) remoteStream.getVideoTracks().forEach(t => t.enabled = false);
+  } else {
+    blackOverlay.style.display = 'none';
+    if (remoteStream) remoteStream.getVideoTracks().forEach(t => t.enabled = true);
+  }
+}
+
+renderHome();
+</script>
+</body>
+</html>
