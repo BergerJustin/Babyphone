@@ -323,21 +323,34 @@ function formatDuration(ms) {
 async function setupBatteryReporting(conn){
   dataConn = conn;
   if (batteryReportInterval) clearInterval(batteryReportInterval);
-  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
+  
+  // 1. Envoi immédiat du temps de fonctionnement (uptime) sans attendre l'API Batterie
+  sendBatteryStatus();
 
-  if (!batteryManager) {
-    try{
+  // 2. Essai de récupération de l'API batterie
+  if ('getBattery' in navigator) {
+    try {
       batteryManager = await navigator.getBattery();
+      
+      // Nettoyage des anciens écouteurs
+      if (batteryLevelListener) batteryManager.removeEventListener('levelchange', batteryLevelListener);
+      if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
+
       batteryLevelListener = () => sendBatteryStatus();
       batteryChargingListener = () => sendBatteryStatus();
+
       batteryManager.addEventListener('levelchange', batteryLevelListener);
       batteryManager.addEventListener('chargingchange', batteryChargingListener);
-    }catch(e){}
+      
+      // Mise à jour avec les vraies valeurs de batterie
+      sendBatteryStatus();
+    } catch(e) {
+      console.warn("API Batterie accessible mais refusée :", e);
+    }
   }
-  sendBatteryStatus();
-  
-  // Dès le premier handshake, la caméra expédie son historique RAM au nouvel écran
-  sendHistoryToScreen();
+
+  // 3. Boucle de rappel toutes les 30 secondes
+  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
 }
 
 function sendBatteryStatus(){
@@ -555,20 +568,16 @@ async function startCamera(facingMode){
   });
 
   peer.on('connection', conn => {
-    dataConn = conn; // On garde la référence active du canal
+    dataConn = conn;
 
-    // Fonction d'initialisation du canal
-    const initDataChannel = () => {
-      setupBatteryReporting(conn); // Relance l'envoi de la batterie
-    };
-
+    // Lancement de la batterie dès la connexion
     if (conn.open) {
-      initDataChannel();
+      setupBatteryReporting(conn);
     } else {
-      conn.on('open', initDataChannel);
+      conn.on('open', () => setupBatteryReporting(conn));
     }
 
-    // Réception des alertes envoyées par l'écran
+    // Traitement des alertes
     conn.on('data', data => {
       if (data && data.type === 'new_alert') {
         recordAlertOnCamera(data.timestamp);
