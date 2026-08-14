@@ -320,7 +320,7 @@ function formatDuration(ms) {
   return `${hrs.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
 }
 
-async function setupBatteryReporting(conn){
+/*async function setupBatteryReporting(conn){
   dataConn = conn;
   if (batteryReportInterval) clearInterval(batteryReportInterval);
   batteryReportInterval = setInterval(sendBatteryStatus, 30000);
@@ -338,6 +338,39 @@ async function setupBatteryReporting(conn){
   
   // Dès le premier handshake, la caméra expédie son historique RAM au nouvel écran
   sendHistoryToScreen();
+}*/
+
+async function setupBatteryReporting(conn){
+  dataConn = conn;
+  if (batteryReportInterval) clearInterval(batteryReportInterval);
+  
+  // 1. Envoi immédiat du temps de fonctionnement (uptime) sans attendre l'API Batterie
+  sendBatteryStatus();
+
+  // 2. Essai de récupération de l'API batterie
+  if ('getBattery' in navigator) {
+    try {
+      batteryManager = await navigator.getBattery();
+      
+      // Nettoyage des anciens écouteurs
+      if (batteryLevelListener) batteryManager.removeEventListener('levelchange', batteryLevelListener);
+      if (batteryChargingListener) batteryManager.removeEventListener('chargingchange', batteryChargingListener);
+
+      batteryLevelListener = () => sendBatteryStatus();
+      batteryChargingListener = () => sendBatteryStatus();
+
+      batteryManager.addEventListener('levelchange', batteryLevelListener);
+      batteryManager.addEventListener('chargingchange', batteryChargingListener);
+      
+      // Mise à jour avec les vraies valeurs de batterie
+      sendBatteryStatus();
+    } catch(e) {
+      console.warn("API Batterie accessible mais refusée :", e);
+    }
+  }
+
+  // 3. Boucle de rappel toutes les 30 secondes
+  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
 }
 
 function sendBatteryStatus(){
@@ -554,7 +587,7 @@ async function startCamera(facingMode){
     call.on('close', () => setStatus('Écran déconnecté.', 'connecting'));
   });
 
-  peer.on('connection', conn => {
+  /*peer.on('connection', conn => {
     dataConn = conn; // On stocke la référence active
     
     conn.on('open', () => {
@@ -564,6 +597,24 @@ async function startCamera(facingMode){
     // On place l'écouteur directement sur 'conn' plutôt que d'attendre
     conn.on('data', data => {
       console.log("Donnée reçue par la caméra :", data);
+      if (data && data.type === 'new_alert') {
+        recordAlertOnCamera(data.timestamp);
+      }
+    });
+  });*/
+
+  peer.on('connection', conn => {
+    dataConn = conn;
+
+    // Lancement de la batterie dès la connexion
+    if (conn.open) {
+      setupBatteryReporting(conn);
+    } else {
+      conn.on('open', () => setupBatteryReporting(conn));
+    }
+
+    // Traitement des alertes
+    conn.on('data', data => {
       if (data && data.type === 'new_alert') {
         recordAlertOnCamera(data.timestamp);
       }
