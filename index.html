@@ -555,16 +555,27 @@ async function startCamera(facingMode){
   });
 
   peer.on('connection', conn => {
-    conn.on('open', () => setupBatteryReporting(conn));
-    
-    // Réception des événements de détection venant du récepteur (Écran)
+    dataConn = conn; // On garde la référence active du canal
+
+    // Fonction d'initialisation du canal
+    const initDataChannel = () => {
+      setupBatteryReporting(conn); // Relance l'envoi de la batterie
+    };
+
+    if (conn.open) {
+      initDataChannel();
+    } else {
+      conn.on('open', initDataChannel);
+    }
+
+    // Réception des alertes envoyées par l'écran
     conn.on('data', data => {
-      if (data.type === 'new_alert') {
+      if (data && data.type === 'new_alert') {
         recordAlertOnCamera(data.timestamp);
       }
     });
   });
-
+  
   peer.on('error', err => {
     if (err.type === 'unavailable-id') {
       setStatus('Ce code est déjà utilisé, rechargez la page pour en générer un autre.', 'error');
