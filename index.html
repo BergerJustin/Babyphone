@@ -21,8 +21,7 @@
   html,body{height:100%;}
   body{
     margin:0;
-    background:
-      radial-gradient(circle at 50% 0%, #1c1a24 0%, var(--bg) 55%);
+    background: radial-gradient(circle at 50% 0%, #1c1a24 0%, var(--bg) 55%);
     color: var(--moon);
     font-family: 'Georgia', 'Iowan Old Style', serif;
     min-height:100dvh;
@@ -133,6 +132,20 @@
     width:100%; border-radius:14px; background:#000; display:block;
     aspect-ratio: 4/3; object-fit:cover; margin-bottom:0;
   }
+  
+  /* Widget Infos Caméra */
+  .info-box{
+    background: #0c0b10; border: 1px solid var(--line);
+    border-radius: 14px; padding: 12px 16px; margin-bottom: 16px;
+    font-family: 'Helvetica Neue', Arial, sans-serif; font-size: .85rem;
+  }
+  .info-row{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .info-row:last-child{ margin-bottom: 0; }
+  .battery-bar-wrap{
+    width: 100%; height: 6px; background: #23202b; border-radius: 3px; overflow: hidden; margin-top: 6px;
+  }
+  .battery-bar-fill{ height: 100%; width: 0%; background: var(--ok); transition: width .3s, background-color .3s; }
+
   .meter-wrap{ margin-bottom:16px; }
   .meter{
     width:100%; height:14px; background:#0c0b10; border:1px solid var(--line);
@@ -157,7 +170,7 @@
   input:checked + .slider:before{ transform: translateX(18px); background: var(--amber); }
   .alert-flash{
     position:fixed; inset:0; background: radial-gradient(circle, rgba(232,102,77,.35), transparent 70%);
-    pointer-events:none; opacity:0; transition:opacity .15s;
+    pointer-events:none; opacity:0; transition:opacity .15s; z-index:99;
   }
   .alert-flash.on{ opacity:1; }
   .hint{ font-family:'Helvetica Neue', Arial, sans-serif; font-size:.78rem; color:var(--moon-dim); text-align:center; margin-top:16px; line-height:1.5; }
@@ -219,12 +232,17 @@ let audioCtx = null, analyser = null, meterRaf = null;
 let alertHistory = [];
 let currentRoomCode = null;
 let blackModeOn = false;
+
+// Gestion de la batterie & durée de fonctionnement
 let batteryManager = null, batteryReportInterval = null;
 let batteryLevelListener = null, batteryChargingListener = null;
 let lowBatteryAlerted = false;
+let cameraStartTime = null;
+let timerInterval = null;
 
 function stopEverything(){
   if (meterRaf) cancelAnimationFrame(meterRaf);
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
   if (call) { try{ call.close(); }catch(e){} call = null; }
   if (dataConn) { try{ dataConn.close(); }catch(e){} dataConn = null; }
   if (peer) { try{ peer.destroy(); }catch(e){} peer = null; }
@@ -237,6 +255,7 @@ function stopEverything(){
     batteryManager = null;
   }
   lowBatteryAlerted = false;
+  cameraStartTime = null;
   if (wakeLock) { try{ wakeLock.release(); }catch(e){} wakeLock = null; }
   document.removeEventListener('visibilitychange', reacquireWakeLockIfNeeded);
   if (inactivityTimer) { clearTimeout(inactivityTimer); inactivityTimer = null; }
@@ -257,7 +276,7 @@ async function requestWakeLock(){
     if ('wakeLock' in navigator) {
       wakeLock = await navigator.wakeLock.request('screen');
     }
-  }catch(e){ /* pas grave, la surveillance continue mais l'écran pourrait se verrouiller */ }
+  }catch(e){}
 }
 
 function reacquireWakeLockIfNeeded(){
@@ -287,13 +306,20 @@ async function setEcoMode(on, overlay){
     } else {
       await videoTrack.applyConstraints({ width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 15, max: 15 } });
     }
-  }catch(e){ /* certains téléphones refusent le changement à chaud, l'image reste dans sa résolution actuelle */ }
+  }catch(e){}
+}
+
+function formatDuration(ms) {
+  const sec = Math.floor((ms / 1000) % 60);
+  const min = Math.floor((ms / (1000 * 60)) % 60);
+  const hrs = Math.floor(ms / (1000 * 60 * 60));
+  return `${hrs.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}:${sec.toString().padStart(2,'0')}`;
 }
 
 async function setupBatteryReporting(conn){
   dataConn = conn;
   if (batteryReportInterval) clearInterval(batteryReportInterval);
-  batteryReportInterval = setInterval(sendBatteryStatus, 60000);
+  batteryReportInterval = setInterval(sendBatteryStatus, 30000);
 
   if (!batteryManager) {
     try{
@@ -302,17 +328,18 @@ async function setupBatteryReporting(conn){
       batteryChargingListener = () => sendBatteryStatus();
       batteryManager.addEventListener('levelchange', batteryLevelListener);
       batteryManager.addEventListener('chargingchange', batteryChargingListener);
-    }catch(e){ /* API batterie non disponible sur ce téléphone/navigateur */ }
+    }catch(e){}
   }
   sendBatteryStatus();
 }
 
 function sendBatteryStatus(){
   if (!dataConn || !dataConn.open) return;
+  const uptime = cameraStartTime ? Date.now() - cameraStartTime : 0;
   if (batteryManager) {
-    dataConn.send({ type: 'battery', supported: true, level: batteryManager.level, charging: batteryManager.charging });
+    dataConn.send({ type: 'status', batterySupported: true, level: batteryManager.level, charging: batteryManager.charging, uptime });
   } else {
-    dataConn.send({ type: 'battery', supported: false });
+    dataConn.send({ type: 'status', batterySupported: false, uptime });
   }
 }
 
@@ -323,12 +350,15 @@ function randomCode(){
   return c;
 }
 
-// Local browser storage for this device's own alert history (works on any real host)
+// Local storage pour l'historique
 function historyLoad(code){
   try{ return JSON.parse(localStorage.getItem('bp-alerts-' + code) || '[]'); }catch(e){ return []; }
 }
 function historySave(code, list){
   try{ localStorage.setItem('bp-alerts-' + code, JSON.stringify(list)); }catch(e){}
+}
+function historyClearStorage(code){
+  try{ localStorage.removeItem('bp-alerts-' + code); }catch(e){}
 }
 
 // ---------- HOME ----------
@@ -399,13 +429,26 @@ function renderScreenSetup(){
 
 async function startCamera(facingMode){
   const code = randomCode();
+  cameraStartTime = Date.now();
   let currentFacingMode = facingMode || 'environment';
+
+  // Réinitialiser tout ancien historique stocké avec ce code
+  historyClearStorage(code);
+
   app.innerHTML = `
-    <button class="back" id="back">← Retour</button>
+    <button class="back" id="back">← Arrêter la caméra</button>
     <div class="eyebrow">Caméra active</div>
     <h1>Code : partagez-le</h1>
     <div class="code-display">${code}</div>
     <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">Initialisation de la caméra…</span></div>
+    
+    <div class="info-box">
+      <div class="info-row">
+        <span>⏱️ Durée d'activation</span>
+        <strong id="camUptime">00:00:00</strong>
+      </div>
+    </div>
+
     <div class="video-wrap" id="localVideoWrap">
       <video id="localVideo" autoplay playsinline muted></video>
       <div class="black-overlay" id="camBlackOverlay">
@@ -422,7 +465,17 @@ async function startCamera(facingMode){
     <div class="hint">🕐 L'aperçu s'assombrit automatiquement après 1 minute sans y toucher (le flux vers l'écran-parent continue). Touchez l'écran pour le rallumer.</div>
     <div class="hint">💡 Pour une autonomie maximale, laissez ce téléphone branché au chargeur.</div>
   `;
-  document.getElementById('back').onclick = () => { stopEverything(); renderHome(); };
+  document.getElementById('back').onclick = () => { 
+    historyClearStorage(code);
+    stopEverything(); 
+    renderHome(); 
+  };
+
+  // Timer durée d'activation local
+  timerInterval = setInterval(() => {
+    const el = document.getElementById('camUptime');
+    if (el && cameraStartTime) el.textContent = formatDuration(Date.now() - cameraStartTime);
+  }, 1000);
 
   const dot = document.getElementById('dot');
   const statusText = document.getElementById('statusText');
@@ -526,13 +579,30 @@ async function startCamera(facingMode){
 async function startScreen(code){
   currentRoomCode = code;
   blackModeOn = false;
+  
+  // Charger l'historique préservé s'il existe
   alertHistory = historyLoad(code);
 
   app.innerHTML = `
-    <button class="back" id="back">← Retour</button>
+    <button class="back" id="back">← Quitter</button>
     <div class="eyebrow">Écran — code ${code}</div>
     <h1>Surveillance en direct</h1>
     <div class="status-row"><div class="dot connecting" id="dot"></div><span id="statusText">Recherche de la caméra…</span></div>
+    
+    <div class="info-box" id="camInfoBox">
+      <div class="info-row">
+        <span>⚡ Batterie Caméra</span>
+        <strong id="battText">Chargement…</strong>
+      </div>
+      <div class="battery-bar-wrap">
+        <div class="battery-bar-fill" id="battFill"></div>
+      </div>
+      <div class="info-row" style="margin-top:10px;">
+        <span>⏱️ Temps de fonctionnement</span>
+        <strong id="screenUptime">--:--:--</strong>
+      </div>
+    </div>
+
     <div class="video-wrap" id="videoWrap">
       <video id="remoteVideo" autoplay playsinline></video>
       <div class="black-overlay" id="blackOverlay">
@@ -626,6 +696,10 @@ function connectToCamera(code, setStatus){
 
   peer.on('open', () => {
     try{
+      // Canal de données pour l'état de la batterie et de la durée
+      dataConn = peer.connect(PEER_PREFIX + code);
+      dataConn.on('data', data => handleIncomingData(data));
+
       call = peer.call(PEER_PREFIX + code, dummyStream);
 
       call.on('stream', stream => {
@@ -652,6 +726,45 @@ function connectToCamera(code, setStatus){
       showRetry(code, setStatus, 'Erreur : ' + err.type);
     }
   });
+}
+
+function handleIncomingData(data){
+  if (data.type === 'status') {
+    const battText = document.getElementById('battText');
+    const battFill = document.getElementById('battFill');
+    const screenUptime = document.getElementById('screenUptime');
+
+    if (screenUptime && data.uptime !== undefined) {
+      screenUptime.textContent = formatDuration(data.uptime);
+    }
+
+    if (battText && battFill) {
+      if (!data.batterySupported) {
+        battText.textContent = "Non disponible";
+        battFill.style.width = "0%";
+      } else {
+        const pct = Math.round(data.level * 100);
+        const chargingIcon = data.charging ? " ⚡" : "";
+        battText.textContent = `${pct}%${chargingIcon}`;
+        battFill.style.width = `${pct}%`;
+
+        if (pct <= 15) {
+          battFill.style.backgroundColor = "var(--alert)";
+          if (!data.charging && !lowBatteryAlerted) {
+            lowBatteryAlerted = true;
+            triggerAlert();
+            alert('⚠️ Batterie caméra faible (' + pct + '%) ! Veuillez la brancher.');
+          }
+        } else if (pct <= 30) {
+          battFill.style.backgroundColor = "var(--amber)";
+        } else {
+          battFill.style.backgroundColor = "var(--ok)";
+        }
+
+        if (data.charging) lowBatteryAlerted = false;
+      }
+    }
+  }
 }
 
 function showRetry(code, setStatus, message){
@@ -692,6 +805,7 @@ function setupMeter(stream){
       if (now - lastAlert > 1800) {
         lastAlert = now;
         triggerAlert();
+        logAlert();
       }
     }
     meterRaf = requestAnimationFrame(loop);
@@ -714,13 +828,12 @@ function triggerAlert(){
     osc.stop(beepCtx.currentTime + 0.25);
     osc.onended = () => beepCtx.close();
   }catch(e){}
-  logAlert();
 }
 
 function logAlert(){
   if (!currentRoomCode) return;
   alertHistory.push(new Date().toISOString());
-  if (alertHistory.length > 20) alertHistory = alertHistory.slice(-20);
+  if (alertHistory.length > 30) alertHistory = alertHistory.slice(-30);
   historySave(currentRoomCode, alertHistory);
   renderHistory();
 }
